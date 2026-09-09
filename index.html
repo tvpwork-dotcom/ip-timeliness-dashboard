@@ -1,0 +1,1939 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP Claim Submission Timeliness Dashboard</title>
+<!--
+  Google Identity Services (Sign-In With Google) — the one deliberate external
+  script dependency in this file. Required for real Google OAuth; everything
+  else in this dashboard runs with zero CDN dependency by design.
+  Setup needed (one-time, in Google Cloud Console > APIs & Services > Credentials):
+    1) Create an OAuth 2.0 Client ID (type: Web application).
+    2) Add this dashboard's real URL (must be http/https, NOT file://) under
+       "Authorized JavaScript origins" — e.g. https://sites.google.com or
+       https://your-github-username.github.io (no path, no trailing slash).
+    3) Paste the Client ID into GOOGLE_CLIENT_ID near the top of the <script>
+       block below (search for "GOOGLE_CLIENT_ID").
+  If this file is opened directly (file://) or the Client ID is left blank,
+  the dashboard automatically falls back to the manual-email gate instead.
+-->
+<script src="https://accounts.google.com/gsi/client" async defer onload="window.__gsiLoaded=true; if(window.__initGoogleSignInReady) initGoogleSignIn();" onerror="window.__gsiFailed=true; if(window.__initGoogleSignInReady) handleGSILoadError();"></script>
+<style>
+  :root{
+    /* ---- Design Tokens (DASHBOARD_KNOWLEDGE.md palette) ---- */
+    --bg:#F0F4F8; --primary:#3B82F6; --secondary:#0EA5E9; --teal:#14B8A6;
+    --purple:#8B5CF6; --pink:#EC4899; --blue:#2563EB; --green:#10B981;
+    --amber:#F59E0B; --orange:#F97316; --red:#EF4444;
+    --text-dark:#0F1B2D; --text-muted:#3A4A5E; --card-bg:#FFFFFF; --border:#E2E8F0;
+    --shadow:0 4px 15px rgba(0,0,0,0.05); --radius:12px;
+    /* ---- internal aliases so the rest of the sheet maps onto the tokens above ---- */
+    --navy:var(--text-dark); --navy2:#0F172A; --navy3:#152238;
+    --blue2:var(--secondary); --cyan:var(--teal); --cyan2:#5EEAD4;
+    --good:var(--teal); --warn:var(--amber); --bad:var(--red);
+    --gray:#5B6B7F; --dgray:var(--text-muted);
+    --card-bd:var(--border); --white:var(--card-bg); --lgray:var(--bg);
+    --shadow-lg:0 10px 30px rgba(30,41,59,0.12); --radius-sm:10px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0;font-family:"Noto Sans Thai","Leelawadee UI",'Segoe UI',-apple-system,Tahoma,Arial,sans-serif;
+    background:var(--bg); color:var(--text-dark); -webkit-font-smoothing:antialiased; font-size:15px;}
+  .wrap{max-width:1600px;margin:0 auto;padding:20px 22px 64px;}
+
+  /* CREDIT LINE — sits right under the dashboard name, inside the header */
+  .credit-line{display:inline-flex;align-items:center;gap:7px;
+    background:linear-gradient(135deg,var(--navy2),var(--primary) 70%,var(--secondary));
+    color:#fff;font-weight:700;font-size:12.5px;letter-spacing:.1px;
+    padding:6px 14px;border-radius:20px;margin:2px 0 10px;box-shadow:0 3px 10px rgba(15,23,42,0.22);}
+  .credit-line .icon{font-size:13.5px;}
+  .credit-line b{font-weight:800;}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#c3cedf;border-radius:20px;}
+  ::-webkit-scrollbar-thumb:hover{background:#a8b7cf;}
+  @keyframes fadeUp{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+  .wrap > *{animation:fadeUp .4s ease both;}
+
+  /* CARD SYSTEM */
+  .card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;
+    box-shadow:var(--shadow);transition:box-shadow .2s ease, transform .2s ease;}
+  .card:hover{box-shadow:var(--shadow-lg);}
+  .card h3{margin:0 0 4px;font-size:16.5px;color:var(--text-dark);font-weight:800;letter-spacing:.1px;}
+  .card p.desc{margin:0 0 12px;font-size:12.5px;color:var(--text-muted);font-weight:600;}
+  /* card-top-* accent bars — defined for every class used below */
+  .card-top-blue{border-top:4px solid var(--primary);}
+  .card-top-secondary{border-top:4px solid var(--secondary);}
+  .card-top-teal{border-top:4px solid var(--teal);}
+  .card-top-purple{border-top:4px solid var(--purple);}
+  .card-top-orange{border-top:4px solid var(--orange);}
+  .card-top-pink{border-top:4px solid var(--pink);}
+  .card-top-green{border-top:4px solid var(--green);}
+  .card-top-amber{border-top:4px solid var(--amber);}
+  .card-top-red{border-top:4px solid var(--red);}
+  .card-top-primary{border-top:4px solid var(--primary);}
+
+  /* HEADER — plain white card, colored top bar, per the doc's all-card visual language */
+  .header{position:relative;background:var(--card-bg);border:1px solid var(--border);border-top:5px solid var(--primary);
+    border-radius:var(--radius);padding:22px 26px;color:var(--text-dark);box-shadow:var(--shadow);margin-bottom:16px;}
+  .header-top{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;}
+  .header h1{margin:0 0 5px;font-size:27px;font-weight:800;letter-spacing:.1px;color:var(--text-dark);}
+  .header h2{margin:0 0 8px;font-size:17px;font-weight:700;color:var(--primary);}
+  .header p.sub{margin:0;font-size:14px;color:var(--text-muted);font-weight:600;}
+  .meta-strip{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+  .meta-chip{background:#EFF6FF;border:1px solid #DBEAFE;border-radius:9px;padding:8px 14px;font-size:13px;color:#1D4ED8;font-weight:600;}
+  .meta-chip b{color:#1E3A8A;font-weight:800;}
+  .badge-fy{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;font-weight:700;border-radius:22px;
+    padding:8px 16px;font-size:13px;white-space:nowrap;box-shadow:0 4px 14px rgba(59,130,246,0.35);}
+
+  /* DATA QUALITY BANNER */
+  .dq-banner{border-radius:var(--radius-sm);padding:12px 16px;font-size:13.5px;font-weight:600;margin-bottom:14px;display:flex;gap:10px;align-items:center;box-shadow:var(--shadow);}
+  .dq-ok{background:#D1FAE5;color:#065F46;border:1px solid #A7F3D0;}
+  .dq-warn{background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;}
+
+  /* FILTER BAR */
+  .filter-card{background:var(--card-bg);border:1px solid var(--border);border-top:4px solid var(--secondary);
+    border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow);margin-bottom:18px;}
+  .filter-row{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;}
+  .filter-group{display:flex;flex-direction:column;gap:6px;min-width:150px;}
+  .filter-group label{font-size:12px;font-weight:800;color:var(--text-dark);text-transform:uppercase;letter-spacing:.5px;}
+  .msel{position:relative;}
+  .msel-btn{background:#F8FAFC;border:1px solid var(--border);border-radius:9px;padding:10px 12px;font-size:13.5px;cursor:pointer;min-width:154px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--text-dark);transition:.15s;font-weight:700;}
+  .msel-btn:hover{border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,0.10);}
+  .msel-btn span:last-child{color:#64748B;font-size:10px;}
+  .msel-panel{display:none;position:absolute;top:calc(100% + 6px);left:0;background:#fff;border:1px solid var(--border);border-radius:11px;
+    box-shadow:0 10px 30px rgba(30,41,59,0.16);z-index:40;min-width:200px;max-height:250px;overflow-y:auto;padding:7px;}
+  .msel-panel.open{display:block; animation:fadeUp .12s ease both;}
+  .msel-opt{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;font-size:13.5px;font-weight:600;color:var(--text-dark);cursor:pointer;transition:.1s;}
+  .msel-opt:hover{background:#EFF6FF;}
+  .msel-opt input{accent-color:var(--primary);width:14px;height:14px;}
+  .btn{border:none;border-radius:9px;padding:10px 18px;font-size:13.5px;font-weight:700;cursor:pointer;transition:.15s;letter-spacing:.1px;}
+  .btn:active{transform:translateY(1px);}
+  .btn-reset{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 4px 12px rgba(59,130,246,0.3);}
+  .btn-reset:hover{filter:brightness(1.08);}
+  .btn-ghost{background:#F1F5F9;color:var(--text-dark);border:1px solid var(--border);}
+  .btn-ghost:hover{background:#E2E8F0;}
+  .filter-note{font-size:11.5px;color:var(--gray);margin-top:12px;line-height:1.6;padding-top:10px;border-top:1px dashed var(--border);}
+
+  /* KPI — white card, colored left accent bar + decorative corner circle (per component 5.1) */
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:18px;}
+  @media(max-width:1200px){.kpi-grid{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:560px){.kpi-grid{grid-template-columns:1fr;}}
+  .kpi{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:15px 17px;box-shadow:var(--shadow);
+    position:relative;overflow:hidden;transition:transform .18s ease, box-shadow .18s ease;}
+  .kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);}
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary);}
+  .kpi::after{content:"";position:absolute;right:-20px;bottom:-20px;width:80px;height:80px;border-radius:50%;
+    background:var(--kpi-accent, var(--primary));opacity:.08;}
+  .kpi.primary::before,.kpi.primary{--kpi-accent:var(--primary);} .kpi.primary::before{background:var(--primary);}
+  .kpi.good::before{background:var(--teal);} .kpi.good{--kpi-accent:var(--teal);}
+  .kpi.warn::before{background:var(--amber);} .kpi.warn{--kpi-accent:var(--amber);}
+  .kpi.bad::before{background:var(--red);} .kpi.bad{--kpi-accent:var(--red);}
+  .kpi.purple::before{background:var(--purple);} .kpi.purple{--kpi-accent:var(--purple);}
+  .kpi.pink::before{background:var(--pink);} .kpi.pink{--kpi-accent:var(--pink);}
+  .kpi.orange::before{background:var(--orange);} .kpi.orange{--kpi-accent:var(--orange);}
+  .kpi.navy::before{background:var(--text-dark);} .kpi.navy{--kpi-accent:var(--text-dark);}
+  .kpi .lbl{position:relative;font-size:12.5px;color:var(--gray);font-weight:800;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;}
+  .kpi .val{position:relative;font-size:31px;font-weight:800;color:var(--text-dark);line-height:1.15;letter-spacing:-.3px;}
+  .kpi .sub{position:relative;font-size:12.5px;color:var(--text-muted);margin-top:6px;font-weight:700;}
+  .trend-badge{position:relative;display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;
+    padding:2px 9px;border-radius:20px;margin-top:6px;}
+  .trend-up{background:#D1FAE5;color:#047857;}
+  .trend-down{background:#FEF3C7;color:#92400E;}
+  .trend-neutral{background:#F1F5F9;color:var(--text-muted);}
+
+  /* INSIGHT + ALERT — component 5.4: two stacked white cards */
+  .insight-col{display:flex;flex-direction:column;gap:16px;}
+  .insight-col .card{height:auto;}
+  .insight-card h3, .alert-card h3{margin:0 0 12px;font-size:16.5px;font-weight:800;display:flex;align-items:center;gap:8px;}
+  .insight-card h3{color:#0D9488;} .alert-card h3{color:#92400E;}
+  .alert-card{background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border:1px solid #FDE68A;border-left:4px solid var(--amber);
+    border-top:none;border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);}
+  .insight-list{margin:0;padding-left:0;display:flex;flex-direction:column;gap:10px;list-style:none;}
+  .insight-list li{font-size:14px;font-weight:500;line-height:1.65;color:var(--text-dark);padding-left:24px;position:relative;}
+  .insight-list li::before{position:absolute;left:0;top:0;font-weight:800;font-size:14px;}
+  .insight-list li{}
+  .insight-list.good-list li::before{content:"✓";color:var(--teal);}
+  .insight-list.alert-list li::before{content:"▲";color:var(--amber);font-size:11px;top:3px;}
+  .insight-list b, .insight-highlight{color:var(--primary);font-weight:700;}
+  .insight-secondary{color:var(--secondary);font-weight:700;}
+
+  /* CHARTS */
+  .chart-wrap{position:relative;width:100%;}
+  .h-320{height:320px;} .h-300{height:300px;} .h-280{height:280px;}
+  .svgchart{width:100%;height:100%;display:block;overflow:visible;}
+  .svgchart .axis-line{stroke:var(--border);stroke-width:1;}
+  .svgchart .grid-line{stroke:#EEF2F7;stroke-width:1;}
+  .svgchart .axis-text{fill:#1E293B;font-size:12.5px;font-weight:700;}
+  .svgchart .datalabel{fill:var(--text-dark);font-size:12.5px;font-weight:800;text-anchor:middle;}
+  .svgchart .bar-label{fill:var(--text-dark);font-size:12.5px;font-weight:800;}
+  .chart-legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:8px;font-size:13.5px;color:var(--text-dark);font-weight:700;}
+  .chart-legend .lg-item{display:flex;align-items:center;gap:7px;}
+  .chart-legend .lg-swatch{width:11px;height:11px;border-radius:3px;display:inline-block;}
+  .chart-tooltip{position:fixed;background:var(--text-dark);color:#fff;padding:9px 12px;border-radius:9px;font-size:11.5px;line-height:1.65;
+    pointer-events:none;z-index:200;box-shadow:0 10px 26px rgba(0,0,0,0.28);display:none;max-width:240px;}
+  .svgchart .hit{cursor:pointer;transition:opacity .12s;}
+  .svgchart .hit:hover{opacity:0.82;}
+  .empty-note{background:#F8FAFC;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:22px;font-size:12.5px;color:var(--text-muted);text-align:center;line-height:1.7;}
+
+  /* GRID */
+  .row{display:grid;gap:16px;margin-bottom:16px;}
+  .row-2{grid-template-columns:1.4fr 1fr;}
+  .row-2b{grid-template-columns:1fr 1fr;}
+  @media(max-width:980px){.row-2,.row-2b{grid-template-columns:1fr;}}
+
+  /* TABLE */
+  .table-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;}
+  .search-box{padding:9px 13px;border:1px solid var(--border);border-radius:9px;font-size:12.5px;min-width:220px;transition:.15s;}
+  .search-box:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,0.12);}
+  table.data-table{width:100%;border-collapse:collapse;font-size:14px;color:var(--text-dark);}
+  table.data-table th{padding:12px 11px;text-align:center;font-weight:800;font-size:13.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;user-select:none;}
+  table.data-table td{padding:11px 11px;text-align:right;border-bottom:1px solid #EDF1F6;font-weight:700;}
+  table.data-table td:first-child, table.data-table th:first-child{text-align:center;}
+  .theme-blue thead th{background:#DBEAFE;color:#1E3A8A;} .theme-blue thead th:hover{background:#BFDBFE;}
+  .theme-teal thead th{background:#CCFBF1;color:#115E59;} .theme-teal thead th:hover{background:#99F6E4;}
+  .theme-pink thead th{background:#FCE7F3;color:#9D174D;} .theme-pink thead th:hover{background:#FBCFE8;}
+  tbody tr{transition:background .1s;}
+  tbody tr:nth-child(even){background:#F8FAFC;}
+  tbody tr:hover td{background-color:#F1F5F9;}
+  .status-pill{display:inline-block;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.2px;}
+  .pill-good{background:#D1FAE5;color:#047857;} .pill-warn{background:#FEF3C7;color:#92400E;} .pill-bad{background:#FEE2E2;color:#B91C1C;}
+  .table-scroll{overflow-x:auto;max-height:460px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;}
+  .table-scroll table{min-width:1100px;}
+  th.sort-asc::after{content:" ▲";opacity:.85;} th.sort-desc::after{content:" ▼";opacity:.85;}
+
+  /* EARLY WARNING */
+  .ew-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:14px;}
+  @media(max-width:980px){.ew-grid{grid-template-columns:repeat(2,1fr);}}
+  .footer{text-align:center;font-size:12.5px;color:var(--gray);margin-top:28px;line-height:1.9;padding-top:18px;border-top:1px solid var(--border);}
+  .section-title{font-size:19px;font-weight:800;color:var(--text-dark);margin:28px 0 13px;display:flex;align-items:center;gap:9px;
+    padding-bottom:9px;border-bottom:2px solid var(--border);}
+  .section-title .tag{font-size:11px;background:linear-gradient(135deg,var(--teal),#0D9488);color:#fff;padding:3px 11px;border-radius:20px;font-weight:700;}
+  details.fieldmap{background:var(--card-bg);border:1px solid var(--border);border-top:4px solid var(--purple);border-radius:var(--radius);
+    padding:14px 18px;margin-bottom:18px;box-shadow:var(--shadow);}
+  details.fieldmap summary{cursor:pointer;font-weight:700;color:var(--text-dark);font-size:13px;}
+  details.fieldmap summary::marker{color:var(--purple);}
+  .map-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;}
+  .map-table td,.map-table th{border:1px solid var(--border);padding:7px 11px;text-align:left;}
+  .map-table th{background:#F1F5F9;font-weight:700;color:var(--text-dark);}
+  .note-box{background:#F8FAFC;border-left:4px solid var(--purple);border-radius:8px;padding:12px 16px;font-size:13px;font-weight:500;color:var(--text-muted);margin-top:10px;line-height:1.75;}
+  .export-btn{background:linear-gradient(135deg,var(--teal),#0D9488);color:#fff;box-shadow:0 4px 12px rgba(20,184,166,0.3);}
+  .export-btn:hover{filter:brightness(1.08);}
+
+  /* SECURE IMPORT PANEL */
+  .import-card{border-top:5px solid var(--blue);margin-bottom:18px;}
+  .import-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+  .auth-status{font-size:12.5px;font-weight:700;color:var(--text-dark);background:#F1F5F9;padding:5px 12px;border-radius:20px;}
+  .login-row,.import-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  #gmailInput{flex:1;min-width:240px;padding:10px 13px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;}
+  #gmailInput:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,0.15);}
+  #importFile{flex:1;min-width:200px;font-size:12.5px;}
+  .login-msg,.import-msg{margin-top:9px;font-size:12.5px;font-weight:700;}
+  .fallback-login{margin-top:12px;border-top:1px dashed var(--border);padding-top:10px;}
+  .fallback-login summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--primary);}
+  .fallback-login summary::marker{color:var(--primary);}
+  #gsiNotice:empty{display:none;}
+  .msg-ok{color:var(--good);}
+  .msg-err{color:var(--bad);}
+  .btn-primary{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 4px 12px rgba(59,130,246,0.3);}
+  .btn-primary:hover{filter:brightness(1.08);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ROW 1: HEADER + META -->
+  <div class="header">
+    <div class="header-top">
+      <div>
+        <h1>IP Claim Submission Timeliness Dashboard</h1>
+        <div class="credit-line"><span class="icon">🏥</span>พัฒนาโดย <b>ศูนย์รายได้ โรงพยาบาลแม่สะเรียง</b></div>
+        <h2>Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน IP01 / IP02</h2>
+        <p class="sub">ติดตาม วิเคราะห์ และเฝ้าระวังระยะเวลาการส่งข้อมูลผู้ป่วยใน &nbsp;|&nbsp; โรงพยาบาลแม่สะเรียง</p>
+      </div>
+      <div id="fyBadge" class="badge-fy">FY —</div>
+    </div>
+    <div class="meta-strip" id="metaStrip"></div>
+  </div>
+
+  <!-- DATA QUALITY -->
+  <div id="dqBanner"></div>
+
+  <!-- FIELD MAPPING / DATA MODEL (transparency panel) -->
+  <details class="fieldmap">
+    <summary>📋 Data Model &amp; Field Mapping (คลิกเพื่อดูรายละเอียดการอ่านไฟล์ต้นทาง)</summary>
+    <div class="note-box">
+      <b>ไฟล์ต้นทาง:</b> ระยะเวลาการส่งข้อมูลผู้ป่วยในแยกรายเดือนที่ส่งข้อมูล (IP01,IP02).xlsx &nbsp;|&nbsp; <b>Sheet:</b> Sheet1 &nbsp;|&nbsp; <b>ระดับข้อมูล:</b> สรุปรายเดือน (Monthly Aggregate) — ไม่มีข้อมูลระดับรายเคส (HN/AN)
+    </div>
+    <table class="map-table">
+      <tr><th>คอลัมน์จริงในไฟล์ Excel</th><th>Mapping ใช้ในระบบ</th></tr>
+      <tr><td>เดือนที่ส่ง</td><td>รหัสเดือน (พ.ศ.-เดือน) → ใช้คำนวณ เดือน / ปี / ไตรมาส / ปีงบประมาณ</td></tr>
+      <tr><td>ภายใน30วัน(ครั้ง) / ภายใน30วัน(AdjRW)</td><td>กลุ่ม ≤30 วัน — จำนวนครั้ง / AdjRW</td></tr>
+      <tr><td>31-60วัน(ครั้ง) / 31-60วัน(AdjRW)</td><td>กลุ่ม 31–60 วัน — จำนวนครั้ง / AdjRW</td></tr>
+      <tr><td>61-90วัน(ครั้ง) / 61-90วัน(AdjRW)</td><td>กลุ่ม 61–90 วัน — จำนวนครั้ง / AdjRW</td></tr>
+      <tr><td>มากกว่า90วัน(ครั้ง) / มากกว่า90วัน(AdjRW)</td><td>กลุ่ม &gt;90 วัน — จำนวนครั้ง / AdjRW</td></tr>
+      <tr><td>รวม (ครั้ง) / รวม (AdjRW)</td><td>ผลรวมทั้งหมดต่อเดือน (ใช้ตรวจสอบ Data Validation)</td></tr>
+    </table>
+    <div class="note-box">
+      <b>หมายเหตุขอบเขตข้อมูล:</b> ไฟล์ต้นฉบับไม่มีคอลัมน์แยกประเภท IP01/IP02, หน่วยบริการ, สิทธิการรักษา, กลุ่มผู้ป่วย หรือระดับรายเคส (HN/AN, วันที่จำหน่าย) ระบบจึงไม่แสดงตัวกรอง/กราฟ/ตารางที่ต้องใช้ข้อมูลเหล่านี้ และจะไม่สมมติค่าเหล่านั้นขึ้นเอง — หากมีการเพิ่มคอลัมน์ดังกล่าวในไฟล์ต้นทางในอนาคต ระบบสามารถเปิดใช้งานส่วนเหล่านี้ได้โดยไม่ต้องแก้โครงสร้างหลัก
+    </div>
+  </details>
+
+  <!-- SECURE IMPORT (Gmail-gated) -->
+  <div class="card import-card" id="importCard">
+    <div class="import-header">
+      <h3>🔐 นำเข้าข้อมูล Excel (เฉพาะผู้ได้รับอนุมัติ)</h3>
+      <div id="authStatus" class="auth-status">ยังไม่ได้เข้าสู่ระบบ</div>
+    </div>
+
+    <div id="loginBox" class="login-box">
+      <div class="note-box" style="margin-top:0">
+        การนำเข้าไฟล์ข้อมูลใหม่ต้องเข้าสู่ระบบด้วยบัญชี Gmail ที่ได้รับอนุมัติเท่านั้น (ผู้ดูแลระบบ: tvpwork@gmail.com)<br>
+        <b>หมายเหตุ:</b> Google Sign-In จริงใช้งานได้เมื่อเปิดไฟล์นี้ผ่าน URL แบบ http/https เท่านั้น (เช่น เว็บไซต์ที่เผยแพร่แล้ว) หากเปิดไฟล์โดยตรงจากเครื่อง (file://) ระบบจะสลับไปใช้การกรอกอีเมลด้วยตนเองแทนโดยอัตโนมัติ —
+        กรณีนั้นเป็นเพียงการตรวจสอบชื่ออีเมลฝั่ง Browser (Soft Gate) ไม่ใช่การยืนยันตัวตนแบบเข้ารหัสจริง
+      </div>
+
+      <div id="gsiArea" style="display:none;text-align:center;padding:6px 0 4px;">
+        <div id="googleSignInBtn" style="display:inline-block;"></div>
+      </div>
+      <div id="gsiNotice" class="login-msg"></div>
+
+      <details class="fallback-login" id="fallbackLogin">
+        <summary>ใช้การกรอกอีเมลด้วยตนเองแทน</summary>
+        <div class="login-row" style="margin-top:10px">
+          <input type="email" id="gmailInput" placeholder="กรอกอีเมล Gmail ของคุณ เช่น name@gmail.com" />
+          <button class="btn btn-primary" id="btnLogin">เข้าสู่ระบบ</button>
+        </div>
+        <div id="loginMsg" class="login-msg"></div>
+      </details>
+    </div>
+
+    <div id="importBox" class="import-box" style="display:none">
+      <div class="import-row">
+        <input type="file" id="importFile" accept=".xlsx,.csv" />
+        <button class="btn btn-primary" id="btnImport">📥 นำเข้าและอัปเดตข้อมูล</button>
+        <button class="btn" id="btnResetData">↺ กลับไปใช้ข้อมูลต้นฉบับ</button>
+        <button class="btn" id="btnLogout">ออกจากระบบ</button>
+      </div>
+      <div class="note-box" style="margin-top:10px">
+        ไฟล์ที่นำเข้าต้องมีคอลัมน์ครบตามต้นฉบับ (ดู Data Model &amp; Field Mapping ด้านบน) ระบบจะ<b>ตรวจสอบชื่อคอลัมน์ทุกครั้งก่อนนำเข้า</b> โดยไม่สมมติ Mapping เอง
+        และจะ<b>อัปเดตทับเฉพาะเดือนที่ซ้ำ (ตามคอลัมน์ "เดือนที่ส่ง")</b> ส่วนเดือนใหม่จะถูกเพิ่มเข้าไปในชุดข้อมูลโดยอัตโนมัติ — KPI/กราฟ/ตาราง/Insight ทั้งหมดจะคำนวณใหม่ทันที
+      </div>
+      <div id="importMsg" class="import-msg"></div>
+    </div>
+  </div>
+
+  <!-- FILTER BAR -->
+  <div class="filter-card">
+    <div class="filter-row" id="filterRow"></div>
+    <div class="filter-note">ตัวกรองทั้งหมดเลือกได้หลายค่า (Multi-select) และมีผลกับ KPI / กราฟ / Insight / ตารางทั้งหมดพร้อมกันทันที — ตัวกรอง "ช่วงระยะเวลา" และ "สถานะ" มีผลกับตารางรายละเอียดตามช่วงเวลา (Row 7) และแถบสรุปช่วงที่เลือก</div>
+  </div>
+
+  <!-- ROW 2: KPI -->
+  <div class="section-title">KPI สรุปภาพรวม <span class="tag">อัปเดตตาม Filter</span></div>
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <!-- ROW 3: Trend + Ranking -->
+  <div class="row row-2">
+    <div class="card card-top-blue">
+      <h3>📈 แนวโน้มการส่งข้อมูลผู้ป่วยในภายใน 30 วัน</h3>
+      <p class="desc">Monthly Timeliness Trend — % ส่งภายใน 30 วันต่อเดือน เทียบเป้าหมาย 90% (คลิกจุดบนกราฟเพื่อ Drill-down รายเดือน)</p>
+      <div class="chart-wrap h-320" id="chartTrend"></div>
+    </div>
+    <div class="card card-top-orange">
+      <h3>🚩 เดือนที่มีสัดส่วนส่งล่าช้าสูงสุด</h3>
+      <p class="desc">Ranking — % ส่งเกิน 30 วัน เรียงจากมากไปน้อย (ไฮไลต์ Top 3)</p>
+      <div class="chart-wrap h-320" id="chartRank"></div>
+    </div>
+  </div>
+
+  <!-- ROW 4: Stacked + Count vs AdjRW -->
+  <div class="row row-2b">
+    <div class="card card-top-teal">
+      <h3>📊 โครงสร้างระยะเวลาการส่งข้อมูลรายเดือน</h3>
+      <p class="desc">100% Stacked Column — สัดส่วนแต่ละช่วงเวลาต่อเดือน (ดูว่าเคสย้ายไปกลุ่มใดเมื่อ Performance ลดลง)</p>
+      <div class="chart-wrap h-300" id="chartStack"></div>
+    </div>
+    <div class="card card-top-purple">
+      <h3>⚖️ เปรียบเทียบสัดส่วนจำนวนครั้งและ AdjRW ตามระยะเวลาการส่ง</h3>
+      <p class="desc">% จำนวนครั้ง เทียบ % AdjRW ในแต่ละช่วงเวลา (ข้อมูลตามตัวกรองปัจจุบัน)</p>
+      <div class="chart-wrap h-300" id="chartCountAdj"></div>
+    </div>
+  </div>
+
+  <!-- ROW 6: Executive Insight + ประเด็นสำหรับพัฒนา -->
+  <div class="section-title">Executive Insight <span class="tag">คำนวณอัตโนมัติจากข้อมูลที่กรอง</span></div>
+  <div class="row" style="grid-template-columns:1fr;">
+    <div class="insight-col">
+      <div class="card card-top-teal insight-card">
+        <h3>🧠 ข้อสรุปเชิงบริหาร (Executive Insight)</h3>
+        <ul class="insight-list good-list" id="insightList"></ul>
+      </div>
+      <div class="alert-card">
+        <h3>⚠️ ประเด็นสำหรับพัฒนา</h3>
+        <ul class="insight-list alert-list" id="alertPanel"></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 7: Detail bucket table (respects bucket/status filter) -->
+  <div class="section-title">รายละเอียดตามช่วงเวลาการส่ง <span class="tag">ตอบสนองตัวกรองช่วงเวลา/สถานะ</span></div>
+  <div class="card card-top-teal" style="margin-bottom:16px;">
+    <div class="table-toolbar">
+      <input type="text" id="searchBucket" class="search-box" placeholder="ค้นหาเดือน / ช่วงเวลา / สถานะ...">
+      <span style="font-size:11.5px;color:var(--gray);" id="bucketCountInfo"></span>
+    </div>
+    <div class="table-scroll">
+      <table id="tblBucket" class="data-table theme-teal">
+        <thead><tr>
+          <th data-key="monthLabel">เดือน</th>
+          <th data-key="fy">ปีงบประมาณ</th>
+          <th data-key="quarter">ไตรมาส</th>
+          <th data-key="bucketLabel">ช่วงเวลา</th>
+          <th data-key="statusLabel">สถานะ</th>
+          <th data-key="count">จำนวนครั้ง</th>
+          <th data-key="adjrw">AdjRW</th>
+          <th data-key="pctOfMonth">% ของเดือนนั้น</th>
+        </tr></thead>
+        <tbody id="tblBucketBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ROW 7b: Main detail table wide format -->
+  <div class="section-title">ตารางรายละเอียดรายเดือน <span class="tag">Sort / Search / Export</span></div>
+  <div class="card card-top-blue">
+    <div class="table-toolbar">
+      <input type="text" id="searchMonth" class="search-box" placeholder="ค้นหาเดือน...">
+      <div style="display:flex;gap:8px;">
+        <button class="btn export-btn" id="btnExportExcel">📊 Export Excel</button>
+        <button class="btn btn-ghost" id="btnExportCsv">⬇ Export CSV</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table id="tblMonth" class="data-table theme-blue">
+        <thead><tr>
+          <th data-key="monthLabel">เดือน</th>
+          <th data-key="fy">ปีงบประมาณ</th>
+          <th data-key="total">จำนวนทั้งหมด</th>
+          <th data-key="le30">≤30 วัน</th>
+          <th data-key="b3160">31-60 วัน</th>
+          <th data-key="b6190">61-90 วัน</th>
+          <th data-key="gt90">&gt;90 วัน</th>
+          <th data-key="pctLe30">% ≤30 วัน</th>
+          <th data-key="pctGt30">% &gt;30 วัน</th>
+          <th data-key="adjTotal">AdjRW รวม</th>
+          <th data-key="adjLe30">AdjRW ≤30 วัน</th>
+          <th data-key="adjGt30">AdjRW &gt;30 วัน</th>
+          <th data-key="status">สถานะ</th>
+        </tr></thead>
+        <tbody id="tblMonthBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ROW 8: Early Warning -->
+  <div class="section-title">🛡️ เคสเสี่ยงเกิน 30 วัน — 30-Day Early Warning</div>
+  <div class="card card-top-pink" style="margin-bottom:16px;">
+    <p class="desc" style="margin-bottom:12px;">
+      ไฟล์ต้นทางเป็นข้อมูลสรุปรายเดือน ไม่มีข้อมูลระดับรายเคส (HN/AN, วันที่จำหน่าย) จึงไม่สามารถคำนวณ "จำนวนวันค้าง" รายเคสได้จริง
+      ระบบจึงแสดง <b>สถานะเฝ้าระวังเชิงพอร์ตโฟลิโอ</b> จากข้อมูลเดือนล่าสุดแทน (จำนวน/AdjRW ที่อยู่ในกลุ่มอายุ 31–60 / 61–90 / &gt;90 วัน ของเดือนล่าสุดตามตัวกรอง)
+      — หากไฟล์ต้นทางมีคอลัมน์ HN/AN และวันที่จำหน่ายในอนาคต ระบบสามารถอัปเกรดเป็นตารางรายเคสพร้อมสถานะ 0-20 / 21-25 / 26-29 / ≥30 วันได้ทันที
+    </p>
+    <div class="ew-grid" id="ewGrid"></div>
+    <div id="ewNote" class="note-box"></div>
+  </div>
+
+  <div class="footer" id="footerNote"></div>
+</div>
+<div class="chart-tooltip" id="chartTooltip"></div>
+
+<script>
+/* ======================================================================
+   1) RAW SOURCE DATA — parsed directly from Sheet1 of the source workbook
+      "ระยะเวลาการส่งข้อมูลผู้ป่วยในแยกรายเดือนที่ส่งข้อมูล (IP01,IP02).xlsx"
+      Columns kept EXACTLY as in the source file. To update with new months,
+      just append rows below in the same column order — everything else
+      (filters, KPIs, charts, insights, validation) recomputes automatically.
+   ====================================================================== */
+const RAW_CSV = `เดือนที่ส่ง,ภายใน30วัน(ครั้ง),ภายใน30วัน(AdjRW),31-60วัน(ครั้ง),31-60วัน(AdjRW),61-90วัน(ครั้ง),61-90วัน(AdjRW),มากกว่า90วัน(ครั้ง),มากกว่า90วัน(AdjRW),รวม (ครั้ง),รวม (AdjRW)
+2568-10,369,365.4162,19,22.5703,1,.7647,0,0,389,388.7512
+2568-11,390,403.5319,31,35.8266,1,6.0334,0,0,422,445.3919
+2568-12,256,255.4256,28,26.7034,0,0,0,0,284,282.129
+2569-01,350,299.9423,72,133.3607,0,0,0,0,422,433.303
+2569-02,271,265.9416,43,67.5834,0,0,0,0,314,333.525
+2569-03,366,304.0133,57,110.9441,0,0,0,0,423,414.9574
+2569-04,252,260.323,34,56.2261,1,.6181,0,0,287,317.1672
+2569-05,293,297.9476,116,185.2181,4,15.9588,0,0,413,499.1245
+2569-06,359,387.7267,52,115.4621,0,0,0,0,411,503.1888
+2569-07,278,294.1608,35,41.0542,0,0,0,0,313,335.215
+2569-08,418,391.3454,107,179.2066,2,1.5226,0,0,527,572.0746`;
+
+const MONTH_TH_SHORT = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+const MONTH_TH_FULL  = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+
+function parseCsv(text){
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",");
+  return lines.slice(1).map(line=>{
+    const parts = line.split(",");
+    const obj = {};
+    headers.forEach((h,i)=> obj[h.trim()] = parts[i] !== undefined ? parts[i].trim() : "");
+    return obj;
+  });
+}
+
+function fiscalInfo(monthKey){
+  // monthKey format: BBBB-MM (Buddhist year - month)
+  const [yStr, mStr] = monthKey.split("-");
+  const y = parseInt(yStr,10), m = parseInt(mStr,10);
+  const fy = (m >= 10) ? y + 1 : y;
+  let q;
+  if (m>=10 && m<=12) q = "Q1";
+  else if (m>=1 && m<=3) q = "Q2";
+  else if (m>=4 && m<=6) q = "Q3";
+  else q = "Q4";
+  return {year:y, month:m, fy:fy, quarter:q};
+}
+
+/* ======================================================================
+   2) BUILD DATA MODEL (monthly, wide format) + VALIDATION
+      Wrapped in buildDataModel() so an Excel/CSV import (see IMPORT section
+      near the bottom) can rebuild the whole model at runtime, in-memory,
+      without touching any other code.
+   ====================================================================== */
+const REQUIRED_HEADERS = ["เดือนที่ส่ง","ภายใน30วัน(ครั้ง)","ภายใน30วัน(AdjRW)","31-60วัน(ครั้ง)","31-60วัน(AdjRW)",
+  "61-90วัน(ครั้ง)","61-90วัน(AdjRW)","มากกว่า90วัน(ครั้ง)","มากกว่า90วัน(AdjRW)","รวม (ครั้ง)","รวม (AdjRW)"];
+
+let rawRows = parseCsv(RAW_CSV);
+let dqIssues = [];
+let monthly = [];
+let bucketRows = [];
+let OPTIONS = {};
+let FILTER_DEFS = [];
+const BUCKET_DEFS = [
+  {key:"le30",  label:"≤30 วัน",   status:"ontime", countField:"le30",  adjField:"adjLe30"},
+  {key:"b3160", label:"31-60 วัน", status:"late",   countField:"b3160", adjField:"adj3160"},
+  {key:"b6190", label:"61-90 วัน", status:"late",   countField:"b6190", adjField:"adj6190"},
+  {key:"gt90",  label:">90 วัน",   status:"late",   countField:"gt90",  adjField:"adjGt90"},
+];
+const BUCKET_LABELS = Object.fromEntries(BUCKET_DEFS.map(b=>[b.key,b.label]));
+const STATUS_LABELS = {ontime:"ส่งทัน (≤30 วัน)", late:"ส่งล่าช้า (>30 วัน)"};
+const QUARTER_LABELS = {Q1:"Q1 (ต.ค.-ธ.ค.)",Q2:"Q2 (ม.ค.-มี.ค.)",Q3:"Q3 (เม.ย.-มิ.ย.)",Q4:"Q4 (ก.ค.-ก.ย.)"};
+
+function buildDataModel(rows){
+  dqIssues = [];
+  monthly = rows.map(r=>{
+  const monthKey = r["เดือนที่ส่ง"];
+  const le30 = parseFloat(r["ภายใน30วัน(ครั้ง)"]) || 0;
+  const adjLe30 = parseFloat(r["ภายใน30วัน(AdjRW)"]) || 0;
+  const b3160 = parseFloat(r["31-60วัน(ครั้ง)"]) || 0;
+  const adj3160 = parseFloat(r["31-60วัน(AdjRW)"]) || 0;
+  const b6190 = parseFloat(r["61-90วัน(ครั้ง)"]) || 0;
+  const adj6190 = parseFloat(r["61-90วัน(AdjRW)"]) || 0;
+  const gt90 = parseFloat(r["มากกว่า90วัน(ครั้ง)"]) || 0;
+  const adjGt90 = parseFloat(r["มากกว่า90วัน(AdjRW)"]) || 0;
+  const total = parseFloat(r["รวม (ครั้ง)"]) || 0;
+  const adjTotal = parseFloat(r["รวม (AdjRW)"]) || 0;
+
+  const fi = fiscalInfo(monthKey);
+  const monthLabel = `${MONTH_TH_SHORT[fi.month-1]} ${fi.year}`;
+  const monthLabelFull = `${MONTH_TH_FULL[fi.month-1]} ${fi.year}`;
+
+  // Data validation checks
+  const sumCount = le30 + b3160 + b6190 + gt90;
+  const sumAdj = adjLe30 + adj3160 + adj6190 + adjGt90;
+  if (Math.abs(sumCount - total) > 0.001){
+    dqIssues.push(`เดือน ${monthLabel}: ผลรวมจำนวนครั้งของช่วงเวลา (${sumCount}) ไม่เท่ากับยอดรวม (${total})`);
+  }
+  if (Math.abs(sumAdj - adjTotal) > 0.05){
+    dqIssues.push(`เดือน ${monthLabel}: ผลรวม AdjRW ของช่วงเวลา (${sumAdj.toFixed(2)}) ไม่เท่ากับยอดรวม AdjRW (${adjTotal.toFixed(2)})`);
+  }
+  [le30,b3160,b6190,gt90,adjLe30,adj3160,adj6190,adjGt90,total,adjTotal].forEach(v=>{
+    if (v < 0) dqIssues.push(`เดือน ${monthLabel}: พบค่าติดลบในข้อมูล`);
+  });
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) dqIssues.push(`รูปแบบเดือนผิดปกติ: ${monthKey}`);
+
+  const gt30 = total - le30;
+  const adjGt30 = adjTotal - adjLe30;
+
+  return {
+    monthKey, monthLabel, monthLabelFull,
+    year: fi.year, month: fi.month, fy: fi.fy, quarter: fi.quarter,
+    le30, adjLe30, b3160, adj3160, b6190, adj6190, gt90, adjGt90,
+    total, adjTotal, gt30, adjGt30,
+    pctLe30: total ? (le30/total*100) : 0,
+    pctGt30: total ? (gt30/total*100) : 0,
+  };
+}).sort((a,b)=> a.monthKey.localeCompare(b.monthKey));
+
+  // duplicate check
+  const seenKeys = new Set();
+  monthly.forEach(m=>{
+    if (seenKeys.has(m.monthKey)) dqIssues.push(`พบเดือนซ้ำในข้อมูล: ${m.monthKey}`);
+    seenKeys.add(m.monthKey);
+  });
+
+  /* Long-format bucket-level rows (for Row 7 detail table & bucket/status filters) */
+  bucketRows = [];
+  monthly.forEach(m=>{
+    BUCKET_DEFS.forEach(b=>{
+      bucketRows.push({
+        monthKey:m.monthKey, monthLabel:m.monthLabel, fy:m.fy, quarter:m.quarter, year:m.year, month:m.month,
+        bucketKey:b.key, bucketLabel:b.label, status:b.status,
+        statusLabel: b.status==="ontime" ? "ส่งทัน" : "ส่งล่าช้า",
+        count:m[b.countField], adjrw:m[b.adjField],
+        pctOfMonth: m.total ? (m[b.countField]/m.total*100) : 0
+      });
+    });
+  });
+
+  OPTIONS = {
+    fy: uniqSorted(monthly.map(m=>m.fy)),
+    month: uniqSorted(monthly.map(m=>m.month)),
+    quarter: ["Q1","Q2","Q3","Q4"],
+    bucket: BUCKET_DEFS.map(b=>b.key),
+    status: ["ontime","late"],
+  };
+
+  FILTER_DEFS = [
+    {key:"fy", label:"ปีงบประมาณ", options: OPTIONS.fy.map(v=>({value:v,label:"FY "+v}))},
+    {key:"month", label:"เดือน", options: OPTIONS.month.map(v=>({value:v,label:MONTH_TH_FULL[v-1]}))},
+    {key:"quarter", label:"ไตรมาส", options: OPTIONS.quarter.map(v=>({value:v,label:QUARTER_LABELS[v]}))},
+    {key:"bucket", label:"ช่วงระยะเวลาการส่งข้อมูล", options: OPTIONS.bucket.map(v=>({value:v,label:BUCKET_LABELS[v]}))},
+    {key:"status", label:"สถานะส่งทัน/ส่งล่าช้า", options: OPTIONS.status.map(v=>({value:v,label:STATUS_LABELS[v]}))},
+  ];
+}
+
+/* ======================================================================
+   3) FILTER STATE
+   ====================================================================== */
+function uniqSorted(arr){ return [...new Set(arr)].sort(); }
+
+buildDataModel(rawRows);
+
+const state = {
+  fy: new Set(), month: new Set(), quarter: new Set(),
+  bucket: new Set(), status: new Set(),
+};
+
+function renderFilterBar(){
+  const row = document.getElementById("filterRow");
+  row.innerHTML = "";
+  FILTER_DEFS.forEach(def=>{
+    const grp = document.createElement("div");
+    grp.className = "filter-group";
+    const lbl = document.createElement("label");
+    lbl.textContent = def.label;
+    const msel = document.createElement("div");
+    msel.className = "msel";
+    const btn = document.createElement("div");
+    btn.className = "msel-btn";
+    btn.id = "btn_"+def.key;
+    btn.innerHTML = `<span>ทั้งหมด</span><span>▾</span>`;
+    const panel = document.createElement("div");
+    panel.className = "msel-panel";
+    panel.id = "panel_"+def.key;
+    def.options.forEach(opt=>{
+      const o = document.createElement("label");
+      o.className = "msel-opt";
+      o.innerHTML = `<input type="checkbox" data-filter="${def.key}" value="${opt.value}"> <span>${opt.label}</span>`;
+      panel.appendChild(o);
+    });
+    btn.addEventListener("click", (e)=>{
+      document.querySelectorAll(".msel-panel").forEach(p=> p!==panel && p.classList.remove("open"));
+      panel.classList.toggle("open");
+      e.stopPropagation();
+    });
+    msel.appendChild(btn); msel.appendChild(panel);
+    grp.appendChild(lbl); grp.appendChild(msel);
+    row.appendChild(grp);
+  });
+  const resetGrp = document.createElement("div");
+  resetGrp.className = "filter-group";
+  resetGrp.innerHTML = `<label>&nbsp;</label><button class="btn btn-reset" id="btnReset">🔄 Reset Filters / ล้างตัวกรองทั้งหมด</button>`;
+  row.appendChild(resetGrp);
+
+  document.body.addEventListener("click", ()=> document.querySelectorAll(".msel-panel").forEach(p=>p.classList.remove("open")));
+  row.addEventListener("click", e=> e.stopPropagation());
+
+  row.querySelectorAll("input[type=checkbox]").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      const key = cb.getAttribute("data-filter");
+      const val = cb.value;
+      const parsedVal = isNaN(val) ? val : Number(val);
+      if (cb.checked) state[key].add(parsedVal); else state[key].delete(parsedVal);
+      updateFilterButtonLabels();
+      renderAll();
+    });
+  });
+  document.getElementById("btnReset").addEventListener("click", ()=>{
+    Object.keys(state).forEach(k=> state[k].clear());
+    row.querySelectorAll("input[type=checkbox]").forEach(cb=> cb.checked=false);
+    updateFilterButtonLabels();
+    renderAll();
+  });
+}
+
+function updateFilterButtonLabels(){
+  FILTER_DEFS.forEach(def=>{
+    const btn = document.getElementById("btn_"+def.key);
+    const n = state[def.key].size;
+    btn.querySelector("span").textContent = n===0 ? "ทั้งหมด" : `เลือก ${n} รายการ`;
+  });
+}
+
+function setMonthFilter(monthKey){
+  // drill-down helper used by chart click
+  const m = monthly.find(x=>x.monthKey===monthKey);
+  if (!m) return;
+  state.fy.clear(); state.fy.add(m.fy);
+  state.month.clear(); state.month.add(m.month);
+  document.querySelectorAll('input[data-filter="fy"]').forEach(cb=> cb.checked = (Number(cb.value)===m.fy));
+  document.querySelectorAll('input[data-filter="month"]').forEach(cb=> cb.checked = (Number(cb.value)===m.month));
+  updateFilterButtonLabels();
+  renderAll();
+}
+
+function monthMatchesFilter(m){
+  if (state.fy.size && !state.fy.has(m.fy)) return false;
+  if (state.month.size && !state.month.has(m.month)) return false;
+  if (state.quarter.size && !state.quarter.has(m.quarter)) return false;
+  return true;
+}
+function bucketRowMatchesFilter(br){
+  if (state.fy.size && !state.fy.has(br.fy)) return false;
+  if (state.month.size && !state.month.has(br.month)) return false;
+  if (state.quarter.size && !state.quarter.has(br.quarter)) return false;
+  if (state.bucket.size && !state.bucket.has(br.bucketKey)) return false;
+  if (state.status.size && !state.status.has(br.status)) return false;
+  return true;
+}
+
+/* ======================================================================
+   4) CHART ENGINE — dependency-free SVG rendering (no external CDN/library,
+      so the dashboard works fully offline / behind restrictive networks)
+   ====================================================================== */
+const COLORS = {navy:"#1E293B",blue:"#3B82F6",blue2:"#0EA5E9",cyan:"#14B8A6",cyan2:"#5EEAD4",good:"#14B8A6",warn:"#F59E0B",bad:"#EF4444",purple:"#8B5CF6",pink:"#EC4899",orange:"#F97316",gray:"#CBD5E1"};
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs){
+  const el = document.createElementNS(SVGNS, tag);
+  if (attrs) Object.keys(attrs).forEach(k=> el.setAttribute(k, attrs[k]));
+  return el;
+}
+const tooltipEl = () => document.getElementById("chartTooltip");
+function showTooltip(evt, html){
+  const tt = tooltipEl();
+  tt.innerHTML = html;
+  tt.style.display = "block";
+  const pad = 14;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  const maxX = window.innerWidth - 250, maxY = window.innerHeight - 100;
+  if (x > maxX) x = evt.clientX - 250;
+  if (y > maxY) y = evt.clientY - 100;
+  tt.style.left = x+"px"; tt.style.top = y+"px";
+}
+function hideTooltip(){ tooltipEl().style.display = "none"; }
+
+function legendHtml(items){
+  return `<div class="chart-legend">${items.map(it=>`<span class="lg-item"><span class="lg-swatch" style="background:${it.color}"></span>${it.label}</span>`).join("")}</div>`;
+}
+
+/* Line chart with optional target reference line, data labels & click drill-down */
+function drawLineChart(container, labels, values, opts){
+  opts = opts || {};
+  container.innerHTML = "";
+  const W = container.clientWidth || 600, H = (container.clientHeight || 320) - (opts.legend? 24:0);
+  const marginL=40, marginR=16, marginT=22, marginB=32;
+  const plotW = W - marginL - marginR, plotH = H - marginT - marginB;
+  const svg = svgEl("svg",{class:"svgchart", viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:"none"});
+  const yMax = opts.yMax !== undefined ? opts.yMax : Math.max(...values,10)*1.15;
+  const yMin = opts.yMin !== undefined ? opts.yMin : 0;
+  const x = i => marginL + (labels.length<=1 ? plotW/2 : plotW * i/(labels.length-1));
+  const y = v => marginT + plotH - ((v-yMin)/(yMax-yMin||1))*plotH;
+
+  // gridlines + y axis labels
+  const steps = 5;
+  for(let i=0;i<=steps;i++){
+    const v = yMin + (yMax-yMin)*i/steps;
+    const gy = y(v);
+    svg.appendChild(svgEl("line",{class:"grid-line",x1:marginL,x2:W-marginR,y1:gy,y2:gy}));
+    const t = svgEl("text",{class:"axis-text",x:marginL-6,y:gy+3,"text-anchor":"end"});
+    t.textContent = opts.yFmt ? opts.yFmt(v) : Math.round(v);
+    svg.appendChild(t);
+  }
+  // x axis labels
+  labels.forEach((lab,i)=>{
+    const t = svgEl("text",{class:"axis-text",x:x(i),y:H-8,"text-anchor":"middle"});
+    t.textContent = lab;
+    svg.appendChild(t);
+  });
+
+  // target reference line
+  if (opts.target !== undefined){
+    const ty = y(opts.target);
+    const line = svgEl("line",{x1:marginL,x2:W-marginR,y1:ty,y2:ty,stroke:COLORS.bad,"stroke-width":1.5,"stroke-dasharray":"6,4"});
+    svg.appendChild(line);
+    const lbl = svgEl("text",{class:"axis-text",x:W-marginR,y:ty-4,"text-anchor":"end",fill:COLORS.bad});
+    lbl.textContent = `เป้าหมาย ${opts.target}%`;
+    svg.appendChild(lbl);
+  }
+
+  // area fill
+  if (values.length){
+    let areaPath = `M ${x(0)} ${y(values[0])}`;
+    values.forEach((v,i)=>{ if(i>0) areaPath += ` L ${x(i)} ${y(v)}`; });
+    areaPath += ` L ${x(values.length-1)} ${y(yMin)} L ${x(0)} ${y(yMin)} Z`;
+    svg.appendChild(svgEl("path",{d:areaPath, fill:"rgba(59,130,246,0.10)", stroke:"none"}));
+    // line path
+    let linePath = `M ${x(0)} ${y(values[0])}`;
+    values.forEach((v,i)=>{ if(i>0) linePath += ` L ${x(i)} ${y(v)}`; });
+    svg.appendChild(svgEl("path",{d:linePath, fill:"none", stroke:COLORS.blue, "stroke-width":2.5}));
+  }
+
+  // points + datalabels + interactions
+  values.forEach((v,i)=>{
+    const color = opts.pointColor ? opts.pointColor(v,i) : COLORS.blue;
+    const c = svgEl("circle",{class:"hit",cx:x(i),cy:y(v),r:5,fill:color,stroke:"#fff","stroke-width":1.5});
+    if (opts.onClick) c.addEventListener("click", ()=> opts.onClick(i));
+    if (opts.onHover) {
+      c.addEventListener("mousemove", (e)=> showTooltip(e, opts.onHover(i)));
+      c.addEventListener("mouseleave", hideTooltip);
+    }
+    svg.appendChild(c);
+    if (opts.dataLabels){
+      const t = svgEl("text",{class:"datalabel",x:x(i),y:y(v)-11});
+      t.textContent = (opts.dataLabelFmt ? opts.dataLabelFmt(v) : v);
+      svg.appendChild(t);
+    }
+  });
+
+  container.appendChild(svg);
+  if (opts.legend) {
+    const lg = document.createElement("div");
+    lg.innerHTML = legendHtml(opts.legend);
+    container.appendChild(lg.firstChild);
+  }
+}
+
+/* Horizontal bar chart with click drill-down + top-N highlight */
+function drawHBarChart(container, labels, values, opts){
+  opts = opts || {};
+  container.innerHTML = "";
+  const W = container.clientWidth || 600;
+  const rowH = 26, gap = 10;
+  const H = labels.length * (rowH+gap) + 20;
+  container.style.overflowY = labels.length>10 ? "auto":"visible";
+  const marginL = 96, marginR = 54, marginT = 10;
+  const plotW = W - marginL - marginR;
+  const maxVal = opts.max !== undefined ? opts.max : Math.max(...values,1)*1.15;
+  const svg = svgEl("svg",{class:"svgchart", viewBox:`0 0 ${W} ${H}`, width:"100%", height:H});
+  values.forEach((v,i)=>{
+    const yy = marginT + i*(rowH+gap);
+    const bw = plotW * (v/(maxVal||1));
+    const color = opts.barColor ? opts.barColor(v,i) : COLORS.blue2;
+    const lbl = svgEl("text",{class:"axis-text",x:marginL-8,y:yy+rowH/2+4,"text-anchor":"end"});
+    lbl.textContent = labels[i];
+    svg.appendChild(lbl);
+    const rect = svgEl("rect",{class:"hit",x:marginL,y:yy,width:Math.max(bw,2),height:rowH,rx:4,fill:color});
+    if (opts.onClick) rect.addEventListener("click", ()=> opts.onClick(i));
+    if (opts.onHover){
+      rect.addEventListener("mousemove",(e)=> showTooltip(e, opts.onHover(i)));
+      rect.addEventListener("mouseleave", hideTooltip);
+    }
+    svg.appendChild(rect);
+    const vt = svgEl("text",{class:"bar-label",x:marginL+bw+6,y:yy+rowH/2+4});
+    vt.textContent = opts.valFmt ? opts.valFmt(v) : v;
+    svg.appendChild(vt);
+  });
+  container.appendChild(svg);
+}
+
+/* Vertical 100%-stacked column chart */
+function drawStackedColumnChart(container, labels, series, opts){
+  // series: [{label,color,data:[percentages per label]}]
+  opts = opts || {};
+  container.innerHTML = "";
+  const W = container.clientWidth || 600, H = (container.clientHeight || 300) - 30;
+  const marginL=38, marginR=12, marginT=10, marginB=30;
+  const plotW = W - marginL - marginR, plotH = H - marginT - marginB;
+  const svg = svgEl("svg",{class:"svgchart", viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:"none"});
+  const n = labels.length;
+  const colW = plotW/n, barW = colW*0.55;
+  // gridlines 0/25/50/75/100
+  [0,25,50,75,100].forEach(v=>{
+    const gy = marginT + plotH - plotH*v/100;
+    svg.appendChild(svgEl("line",{class:"grid-line",x1:marginL,x2:W-marginR,y1:gy,y2:gy}));
+    const t = svgEl("text",{class:"axis-text",x:marginL-6,y:gy+3,"text-anchor":"end"}); t.textContent=v+"%";
+    svg.appendChild(t);
+  });
+  labels.forEach((lab,i)=>{
+    const cx = marginL + colW*i + colW/2;
+    let yCursor = marginT + plotH;
+    series.forEach(s=>{
+      const val = s.data[i]||0;
+      const segH = plotH * val/100;
+      const rect = svgEl("rect",{class:"hit",x:cx-barW/2,y:yCursor-segH,width:barW,height:Math.max(segH,0),fill:s.color});
+      if (opts.onHover) {
+        rect.addEventListener("mousemove",(e)=> showTooltip(e, opts.onHover(i,s.key,val)));
+        rect.addEventListener("mouseleave", hideTooltip);
+      }
+      svg.appendChild(rect);
+      yCursor -= segH;
+    });
+    const t = svgEl("text",{class:"axis-text",x:cx,y:H+2,"text-anchor":"middle"}); t.textContent = lab;
+    svg.appendChild(t);
+  });
+  container.appendChild(svg);
+  const lg = document.createElement("div");
+  lg.innerHTML = legendHtml(series.map(s=>({color:s.color,label:s.label})));
+  container.appendChild(lg.firstChild);
+}
+
+/* Clustered (grouped) vertical bar chart */
+function drawClusteredBarChart(container, labels, series, opts){
+  opts = opts || {};
+  container.innerHTML = "";
+  const W = container.clientWidth || 600, H = (container.clientHeight || 300) - 30;
+  const marginL=38, marginR=12, marginT=16, marginB=30;
+  const plotW = W - marginL - marginR, plotH = H - marginT - marginB;
+  const svg = svgEl("svg",{class:"svgchart", viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:"none"});
+  const n = labels.length, s = series.length;
+  const groupW = plotW/n;
+  const barW = (groupW*0.7)/s;
+  const maxVal = Math.max(...series.flatMap(x=>x.data), 1)*1.15;
+  [0,25,50,75,100].filter(v=>v<=maxVal+1).forEach(v=>{
+    const gy = marginT + plotH - plotH*v/maxVal;
+    svg.appendChild(svgEl("line",{class:"grid-line",x1:marginL,x2:W-marginR,y1:gy,y2:gy}));
+    const t = svgEl("text",{class:"axis-text",x:marginL-6,y:gy+3,"text-anchor":"end"}); t.textContent=v+"%";
+    svg.appendChild(t);
+  });
+  labels.forEach((lab,i)=>{
+    const groupX = marginL + groupW*i + groupW*0.15;
+    series.forEach((s2,si)=>{
+      const val = s2.data[i]||0;
+      const bh = plotH*(val/maxVal);
+      const bx = groupX + si*barW;
+      const rect = svgEl("rect",{class:"hit",x:bx,y:marginT+plotH-bh,width:barW*0.85,height:Math.max(bh,0),rx:3,fill:s2.color});
+      if (opts.onHover){
+        rect.addEventListener("mousemove",(e)=> showTooltip(e, opts.onHover(i,s2.label,val)));
+        rect.addEventListener("mouseleave", hideTooltip);
+      }
+      svg.appendChild(rect);
+    });
+    const t = svgEl("text",{class:"axis-text",x:marginL+groupW*i+groupW/2,y:H+2,"text-anchor":"middle"}); t.textContent = lab;
+    svg.appendChild(t);
+  });
+  container.appendChild(svg);
+  const lg = document.createElement("div");
+  lg.innerHTML = legendHtml(series.map(s=>({color:s.color,label:s.label})));
+  container.appendChild(lg.firstChild);
+}
+
+function fmtInt(n){ return Math.round(n).toLocaleString("th-TH"); }
+function fmtPct(n){ return (Math.round(n*100)/100).toFixed(2)+"%"; }
+function fmtAdj(n){ return (Math.round(n*100)/100).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+/* ======================================================================
+   5) RENDER: KPI
+   ====================================================================== */
+function renderKPI(filtered){
+  const grid = document.getElementById("kpiGrid");
+  const total = filtered.reduce((s,m)=>s+m.total,0);
+  const le30 = filtered.reduce((s,m)=>s+m.le30,0);
+  const gt30 = filtered.reduce((s,m)=>s+m.gt30,0);
+  const adjTotal = filtered.reduce((s,m)=>s+m.adjTotal,0);
+  const adjLe30 = filtered.reduce((s,m)=>s+m.adjLe30,0);
+  const adjGt30 = filtered.reduce((s,m)=>s+m.adjGt30,0);
+  const pctLe30 = total ? le30/total*100 : 0;
+  const pctGt30 = total ? gt30/total*100 : 0;
+
+  const sortedByPct = [...filtered].sort((a,b)=> b.pctLe30 - a.pctLe30);
+  const bestMonth = sortedByPct[0];
+  const worstMonth = sortedByPct[sortedByPct.length-1];
+
+  const byMonthKey = [...filtered].sort((a,b)=> a.monthKey.localeCompare(b.monthKey));
+  let momDelta = null;
+  if (byMonthKey.length>=2){
+    const last = byMonthKey[byMonthKey.length-1], prev = byMonthKey[byMonthKey.length-2];
+    momDelta = last.pctLe30 - prev.pctLe30;
+  }
+
+  const cards = [
+    {lbl:"จำนวนครั้งทั้งหมด", val:fmtInt(total), sub:`${filtered.length} เดือนที่เลือก`, cls:"primary"},
+    {lbl:"จำนวนครั้งส่งภายใน 30 วัน", val:fmtInt(le30), sub:`คิดเป็น ${fmtPct(pctLe30)}`, cls:"good"},
+    {lbl:"% ส่งภายใน 30 วัน", val:fmtPct(pctLe30), sub:"เป้าหมาย ≥ 90%", cls: pctLe30>=90?"good":(pctLe30>=80?"warn":"bad")},
+    {lbl:"จำนวนครั้งส่งเกิน 30 วัน", val:fmtInt(gt30), sub:`คิดเป็น ${fmtPct(pctGt30)}`, cls:"orange"},
+    {lbl:"% ส่งเกิน 30 วัน", val:fmtPct(pctGt30), sub:"ยิ่งต่ำยิ่งดี", cls: pctGt30<=10?"good":(pctGt30<=20?"warn":"bad")},
+    {lbl:"AdjRW รวม", val:fmtAdj(adjTotal), sub:"น้ำหนักสัมพัทธ์รวมทั้งหมด", cls:"purple"},
+    {lbl:"AdjRW ที่ส่งภายใน 30 วัน", val:fmtAdj(adjLe30), sub: total? fmtPct(adjLe30/adjTotal*100||0)+" ของ AdjRW รวม":"-", cls:"good"},
+    {lbl:"AdjRW ที่ส่งเกิน 30 วัน", val:fmtAdj(adjGt30), sub: adjTotal? fmtPct(adjGt30/adjTotal*100||0)+" ของ AdjRW รวม":"-", cls:"pink"},
+    {lbl:"เดือนที่ดีที่สุด", val: bestMonth?bestMonth.monthLabel:"-", sub: bestMonth?`% ≤30 วัน = ${fmtPct(bestMonth.pctLe30)}`:"-", cls:"good"},
+    {lbl:"เดือนที่ควรเฝ้าระวัง", val: worstMonth?worstMonth.monthLabel:"-", sub: worstMonth?`% ≤30 วัน = ${fmtPct(worstMonth.pctLe30)}`:"-", cls:"bad"},
+    {lbl:"% เปลี่ยนแปลงจากเดือนก่อน", val: momDelta===null?"-":(momDelta>=0?"+":"")+momDelta.toFixed(2)+" จุด",
+      sub: momDelta===null?"ข้อมูลไม่พอเปรียบเทียบ":(momDelta>=0?"ดีขึ้นจากเดือนก่อน":"แย่ลงจากเดือนก่อน"),
+      cls: momDelta===null?"primary":(momDelta>=0?"good":"warn"),
+      badge: momDelta===null? "" : `<span class="trend-badge ${momDelta>=0?"trend-up":"trend-down"}">${momDelta>=0?"▲":"▼"} ${Math.abs(momDelta).toFixed(2)} จุด</span>`},
+  ];
+  grid.innerHTML = cards.map(c=>`
+    <div class="kpi ${c.cls}">
+      <div class="lbl">${c.lbl}</div>
+      <div class="val">${c.val}</div>
+      <div class="sub">${c.sub}</div>
+      ${c.badge || ""}
+    </div>`).join("");
+
+  return {total,le30,gt30,adjTotal,adjLe30,adjGt30,pctLe30,pctGt30,bestMonth,worstMonth,momDelta};
+}
+
+/* ======================================================================
+   6) RENDER: ALERTS
+   ====================================================================== */
+function renderAlerts(kpi, filtered){
+  const panel = document.getElementById("alertPanel");
+  const alerts = [];
+  if (kpi.pctLe30 < 80){
+    alerts.push(`🚨 <b>ต้องเร่งติดตาม:</b> % ส่งภายใน 30 วัน อยู่ที่ ${fmtPct(kpi.pctLe30)} ต่ำกว่า 80%`);
+  } else if (kpi.pctLe30 < 90){
+    alerts.push(`⚠️ <b>ต่ำกว่าเป้าหมาย:</b> % ส่งภายใน 30 วัน อยู่ที่ ${fmtPct(kpi.pctLe30)} ต่ำกว่าเป้าหมาย 90% อยู่ ${(90-kpi.pctLe30).toFixed(2)} จุด`);
+  }
+  // AdjRW weight vs count weight check for the >30 group
+  const pctCountGt30 = kpi.pctGt30;
+  const pctAdjGt30 = kpi.adjTotal ? (kpi.adjGt30/kpi.adjTotal*100) : 0;
+  if (pctAdjGt30 - pctCountGt30 > 3){
+    alerts.push(`⚖️ พบเคสล่าช้าที่มีน้ำหนัก AdjRW สูง (AdjRW กลุ่มล่าช้า ${fmtPct(pctAdjGt30)} เทียบสัดส่วนจำนวนครั้งล่าช้า ${fmtPct(pctCountGt30)}) ควรเร่งติดตามก่อนครบกำหนด`);
+  }
+  const b6190 = filtered.reduce((s,m)=>s+m.b6190,0);
+  const gt90 = filtered.reduce((s,m)=>s+m.gt90,0);
+  if (b6190>0 || gt90>0){
+    alerts.push(`⏱️ พบเคสในกลุ่มความเสี่ยงสูง — 61-90 วัน: ${fmtInt(b6190)} ครั้ง, มากกว่า 90 วัน: ${fmtInt(gt90)} ครั้ง`);
+  }
+  if (dqIssues.length){
+    alerts.push(`🧩 Data Quality Warning: พบความผิดปกติของข้อมูล ${dqIssues.length} รายการ (ดูรายละเอียดด้านบน)`);
+  }
+  if (!alerts.length){
+    alerts.push(`✅ ไม่พบประเด็นเสี่ยงที่ต้องเฝ้าระวังเพิ่มเติมในขณะนี้ ข้อมูลอยู่ในเกณฑ์ปกติทั้งหมด`);
+  }
+  panel.innerHTML = alerts.map(a=>`<li>${a}</li>`).join("");
+}
+
+/* ======================================================================
+   7) RENDER: CHARTS
+   ====================================================================== */
+function renderCharts(filtered){
+  const sorted = [...filtered].sort((a,b)=> a.monthKey.localeCompare(b.monthKey));
+  const labels = sorted.map(m=>m.monthLabel);
+
+  // --- Trend chart ---
+  const pctData = sorted.map(m=>Number(m.pctLe30.toFixed(2)));
+  drawLineChart(document.getElementById("chartTrend"), labels, pctData, {
+    yMax:100, yMin:0, target:90, dataLabels:true,
+    dataLabelFmt:v=>v.toFixed(1)+"%",
+    pointColor:v=> v>=90?COLORS.good : v>=80?COLORS.warn : COLORS.bad,
+    onClick:(i)=> setMonthFilter(sorted[i].monthKey),
+    onHover:(i)=>{
+      const m = sorted[i];
+      return `<b>${m.monthLabel}</b><br>% ≤30 วัน: ${fmtPct(m.pctLe30)}<br>จำนวนทั้งหมด: ${fmtInt(m.total)}<br>≤30 วัน: ${fmtInt(m.le30)}<br>&gt;30 วัน: ${fmtInt(m.gt30)}<br>AdjRW: ${fmtAdj(m.adjTotal)}`;
+    },
+    legend:[{color:COLORS.blue,label:"% ส่งภายใน 30 วัน"},{color:COLORS.bad,label:"เป้าหมาย 90%"}]
+  });
+
+  // --- Ranking chart (desc by pctGt30) ---
+  const rankSorted = [...filtered].sort((a,b)=> b.pctGt30 - a.pctGt30);
+  const rankLabels = rankSorted.map(m=>m.monthLabel);
+  const rankData = rankSorted.map(m=>Number(m.pctGt30.toFixed(2)));
+  drawHBarChart(document.getElementById("chartRank"), rankLabels, rankData, {
+    max:100,
+    barColor:(v,i)=> i<3 ? COLORS.bad : COLORS.orange,
+    valFmt:v=>v.toFixed(1)+"%",
+    onClick:(i)=> setMonthFilter(rankSorted[i].monthKey),
+    onHover:(i)=>{
+      const m = rankSorted[i];
+      return `<b>${m.monthLabel}</b>${i<3?' <span style="color:#ffb3ab">(Top '+(i+1)+' ปัญหา)</span>':''}<br>% ล่าช้า: ${fmtPct(m.pctGt30)}<br>จำนวนเคสล่าช้า: ${fmtInt(m.gt30)}<br>AdjRW ล่าช้า: ${fmtAdj(m.adjGt30)}`;
+    }
+  });
+
+  // --- 100% stacked column ---
+  const stackSeries = [
+    {key:"le30", label:"≤30 วัน", color:COLORS.good, data:sorted.map(m=> m.total? m.le30/m.total*100:0)},
+    {key:"b3160", label:"31-60 วัน", color:COLORS.warn, data:sorted.map(m=> m.total? m.b3160/m.total*100:0)},
+    {key:"b6190", label:"61-90 วัน", color:COLORS.bad, data:sorted.map(m=> m.total? m.b6190/m.total*100:0)},
+    {key:"gt90", label:">90 วัน", color:"#B91C1C", data:sorted.map(m=> m.total? m.gt90/m.total*100:0)},
+  ];
+  drawStackedColumnChart(document.getElementById("chartStack"), labels, stackSeries, {
+    onHover:(i,key,val)=>{
+      const m = sorted[i]; const s = stackSeries.find(x=>x.key===key);
+      return `<b>${m.monthLabel}</b><br>${s.label}: ${val.toFixed(2)}%`;
+    }
+  });
+
+  // --- Count vs AdjRW clustered ---
+  const totalCount = filtered.reduce((s,m)=>s+m.total,0);
+  const totalAdj = filtered.reduce((s,m)=>s+m.adjTotal,0);
+  const bucketAgg = BUCKET_DEFS.map(b=>({
+    label:b.label,
+    count: filtered.reduce((s,m)=>s+m[b.countField],0),
+    adj: filtered.reduce((s,m)=>s+m[b.adjField],0)
+  }));
+  const caSeries = [
+    {label:"% จำนวนครั้ง", color:COLORS.purple, data:bucketAgg.map(b=> totalCount? b.count/totalCount*100:0)},
+    {label:"% AdjRW", color:COLORS.pink, data:bucketAgg.map(b=> totalAdj? b.adj/totalAdj*100:0)},
+  ];
+  drawClusteredBarChart(document.getElementById("chartCountAdj"), bucketAgg.map(b=>b.label), caSeries, {
+    onHover:(i,label,val)=> `<b>${bucketAgg[i].label}</b><br>${label}: ${val.toFixed(2)}%`
+  });
+}
+
+/* ======================================================================
+   8) RENDER: INSIGHT
+   ====================================================================== */
+function renderInsight(kpi, filtered){
+  const list = document.getElementById("insightList");
+  const items = [];
+  const gapToTarget = 90 - kpi.pctLe30;
+  if (gapToTarget > 0){
+    items.push(`ข้อมูลที่เลือกมีการส่งข้อมูลภายใน 30 วัน <b>${fmtPct(kpi.pctLe30)}</b> ต่ำกว่าเป้าหมาย 90% อยู่ <b>${gapToTarget.toFixed(2)} จุดเปอร์เซ็นต์</b>`);
+  } else {
+    items.push(`ข้อมูลที่เลือกมีการส่งข้อมูลภายใน 30 วัน <b>${fmtPct(kpi.pctLe30)}</b> ผ่านเป้าหมาย 90% แล้ว (สูงกว่าเป้า ${(-gapToTarget).toFixed(2)} จุด)`);
+  }
+  if (kpi.worstMonth){
+    items.push(`เดือนที่ควรเฝ้าระวังมากที่สุดคือ <b>${kpi.worstMonth.monthLabelFull || kpi.worstMonth.monthLabel}</b> (% ≤30 วัน = ${fmtPct(kpi.worstMonth.pctLe30)})`);
+  }
+  if (kpi.bestMonth){
+    items.push(`เดือนที่มีผลงานดีที่สุดคือ <b>${kpi.bestMonth.monthLabelFull || kpi.bestMonth.monthLabel}</b> (% ≤30 วัน = ${fmtPct(kpi.bestMonth.pctLe30)})`);
+  }
+  const b3160 = filtered.reduce((s,m)=>s+m.b3160,0);
+  const b6190 = filtered.reduce((s,m)=>s+m.b6190,0);
+  const gt90 = filtered.reduce((s,m)=>s+m.gt90,0);
+  const maxBucket = [{k:"31-60 วัน",v:b3160},{k:"61-90 วัน",v:b6190},{k:">90 วัน",v:gt90}].sort((a,b)=>b.v-a.v)[0];
+  if (maxBucket && maxBucket.v>0){
+    items.push(`ปัญหาหลักของกลุ่มส่งล่าช้าอยู่ในช่วง <b>${maxBucket.k}</b> (${fmtInt(maxBucket.v)} ครั้ง)`);
+  }
+  const pctAdjGt30 = kpi.adjTotal ? kpi.adjGt30/kpi.adjTotal*100 : 0;
+  if (pctAdjGt30 - kpi.pctGt30 > 1){
+    items.push(`แม้กลุ่มส่งล่าช้าจะมีสัดส่วนจำนวนเคส ${fmtPct(kpi.pctGt30)} แต่มีสัดส่วน AdjRW สูงถึง ${fmtPct(pctAdjGt30)} — สูงกว่าสัดส่วนจำนวนเคส สะท้อนว่าเคสล่าช้ามีน้ำหนักทางการเงินสูงกว่าค่าเฉลี่ย`);
+  } else {
+    items.push(`สัดส่วน AdjRW ของกลุ่มส่งล่าช้า (${fmtPct(pctAdjGt30)}) ใกล้เคียงกับสัดส่วนจำนวนเคส (${fmtPct(kpi.pctGt30)}) ไม่พบความเสี่ยงด้านน้ำหนัก AdjRW ผิดปกติ`);
+  }
+  if (kpi.momDelta !== null){
+    items.push(kpi.momDelta >= 0
+      ? `แนวโน้มความทันเวลาล่าสุด <b>ดีขึ้น</b> จากเดือนก่อนหน้า ${kpi.momDelta.toFixed(2)} จุดเปอร์เซ็นต์`
+      : `แนวโน้มความทันเวลาล่าสุด <b>ลดลง</b> จากเดือนก่อนหน้า ${Math.abs(kpi.momDelta).toFixed(2)} จุดเปอร์เซ็นต์`);
+  }
+  list.innerHTML = items.map(t=>`<li>${t}</li>`).join("");
+}
+
+/* ======================================================================
+   9) RENDER: TABLES
+   ====================================================================== */
+let bucketSortState = {key:"monthLabel", dir:1};
+let monthSortState = {key:"monthKey", dir:1};
+
+function statusPill(pct){
+  if (pct>=90) return `<span class="status-pill pill-good">ดี</span>`;
+  if (pct>=80) return `<span class="status-pill pill-warn">เฝ้าระวัง</span>`;
+  return `<span class="status-pill pill-bad">ต้องเร่งแก้ไข</span>`;
+}
+
+function renderBucketTable(filteredBucketRows){
+  let rows = [...filteredBucketRows];
+  const q = document.getElementById("searchBucket").value.trim().toLowerCase();
+  if (q){
+    rows = rows.filter(r => (r.monthLabel+r.bucketLabel+r.statusLabel+r.fy).toLowerCase().includes(q));
+  }
+  rows.sort((a,b)=>{
+    const k = bucketSortState.key;
+    if (typeof a[k]==="number") return (a[k]-b[k])*bucketSortState.dir;
+    return String(a[k]).localeCompare(String(b[k]))*bucketSortState.dir;
+  });
+  document.getElementById("bucketCountInfo").textContent = `${rows.length.toLocaleString()} รายการ`;
+  document.getElementById("tblBucketBody").innerHTML = rows.map(r=>`
+    <tr>
+      <td>${r.monthLabel}</td>
+      <td>FY ${r.fy}</td>
+      <td>${r.quarter}</td>
+      <td>${r.bucketLabel}</td>
+      <td>${r.status==="ontime"?'<span class="status-pill pill-good">ส่งทัน</span>':'<span class="status-pill pill-bad">ส่งล่าช้า</span>'}</td>
+      <td>${fmtInt(r.count)}</td>
+      <td>${fmtAdj(r.adjrw)}</td>
+      <td>${fmtPct(r.pctOfMonth)}</td>
+    </tr>`).join("") || `<tr><td colspan="8" style="padding:20px;color:#999;">ไม่พบข้อมูลตามเงื่อนไขที่เลือก</td></tr>`;
+}
+
+function renderMonthTable(filtered){
+  let rows = [...filtered];
+  const q = document.getElementById("searchMonth").value.trim().toLowerCase();
+  if (q) rows = rows.filter(r => r.monthLabel.toLowerCase().includes(q));
+  rows.sort((a,b)=>{
+    const k = monthSortState.key;
+    if (typeof a[k]==="number") return (a[k]-b[k])*monthSortState.dir;
+    return String(a[k]).localeCompare(String(b[k]))*monthSortState.dir;
+  });
+  document.getElementById("tblMonthBody").innerHTML = rows.map(m=>`
+    <tr>
+      <td><b>${m.monthLabel}</b></td>
+      <td>FY ${m.fy}</td>
+      <td>${fmtInt(m.total)}</td>
+      <td>${fmtInt(m.le30)}</td>
+      <td>${fmtInt(m.b3160)}</td>
+      <td>${fmtInt(m.b6190)}</td>
+      <td>${fmtInt(m.gt90)}</td>
+      <td>${fmtPct(m.pctLe30)}</td>
+      <td>${fmtPct(m.pctGt30)}</td>
+      <td>${fmtAdj(m.adjTotal)}</td>
+      <td>${fmtAdj(m.adjLe30)}</td>
+      <td>${fmtAdj(m.adjGt30)}</td>
+      <td>${statusPill(m.pctLe30)}</td>
+    </tr>`).join("") || `<tr><td colspan="13" style="padding:20px;color:#999;">ไม่พบข้อมูลตามเงื่อนไขที่เลือก</td></tr>`;
+
+  window._currentMonthRowsForExport = rows;
+}
+
+function setupTableSorting(){
+  document.querySelectorAll("#tblBucket thead th").forEach(th=>{
+    th.addEventListener("click", ()=>{
+      const key = th.getAttribute("data-key");
+      if (bucketSortState.key===key) bucketSortState.dir *= -1; else { bucketSortState.key=key; bucketSortState.dir=1; }
+      document.querySelectorAll("#tblBucket thead th").forEach(t=>t.classList.remove("sort-asc","sort-desc"));
+      th.classList.add(bucketSortState.dir===1?"sort-asc":"sort-desc");
+      renderAll();
+    });
+  });
+  document.querySelectorAll("#tblMonth thead th").forEach(th=>{
+    th.addEventListener("click", ()=>{
+      const key = th.getAttribute("data-key");
+      if (monthSortState.key===key) monthSortState.dir *= -1; else { monthSortState.key=key; monthSortState.dir=1; }
+      document.querySelectorAll("#tblMonth thead th").forEach(t=>t.classList.remove("sort-asc","sort-desc"));
+      th.classList.add(monthSortState.dir===1?"sort-asc":"sort-desc");
+      renderAll();
+    });
+  });
+  document.getElementById("searchBucket").addEventListener("input", renderAll);
+  document.getElementById("searchMonth").addEventListener("input", renderAll);
+  document.getElementById("btnExportCsv").addEventListener("click", exportCsv);
+  document.getElementById("btnExportExcel").addEventListener("click", exportExcel);
+}
+
+function exportCsv(){
+  const rows = window._currentMonthRowsForExport || [];
+  const headers = ["เดือน","ปีงบประมาณ","จำนวนทั้งหมด","≤30 วัน","31-60 วัน","61-90 วัน",">90 วัน","% ≤30 วัน","% >30 วัน","AdjRW รวม","AdjRW ≤30 วัน","AdjRW >30 วัน"];
+  const lines = [headers.join(",")];
+  rows.forEach(m=>{
+    lines.push([m.monthLabel, "FY "+m.fy, m.total, m.le30, m.b3160, m.b6190, m.gt90,
+      m.pctLe30.toFixed(2), m.pctGt30.toFixed(2), m.adjTotal.toFixed(2), m.adjLe30.toFixed(2), m.adjGt30.toFixed(2)].join(","));
+  });
+  const blob = new Blob(["﻿"+lines.join("\n")], {type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "ip_submission_timeliness_detail.csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ======================================================================
+   9b) EXPORT TO REAL .XLSX — built from scratch in pure JS (no external
+       library / CDN, so it works fully offline). Implements just enough
+       of the OOXML + ZIP (store, uncompressed) spec for Excel to open it
+       natively with no warning dialog.
+   ====================================================================== */
+const XlsxWriter = (()=>{
+  // ---- CRC32 ----
+  const crcTable = (()=>{
+    const t = new Uint32Array(256);
+    for(let n=0;n<256;n++){
+      let c=n;
+      for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1);
+      t[n]=c>>>0;
+    }
+    return t;
+  })();
+  function crc32(bytes){
+    let crc = 0xFFFFFFFF;
+    for(let i=0;i<bytes.length;i++) crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function strToBytes(str){ return new TextEncoder().encode(str); }
+
+  // ---- Minimal ZIP (stored/uncompressed) writer ----
+  function u16(v){ return [v & 0xFF, (v>>>8)&0xFF]; }
+  function u32(v){ return [v&0xFF,(v>>>8)&0xFF,(v>>>16)&0xFF,(v>>>24)&0xFF]; }
+  function dosDateTime(){
+    // fixed timestamp is fine for generated exports
+    return {time:0, date:0x21}; // 1980-01-01
+  }
+  function buildZip(files){ // files: [{name, data(Uint8Array)}]
+    const localParts = [], centralParts = [];
+    let offset = 0;
+    const {time,date} = dosDateTime();
+    files.forEach(f=>{
+      const nameBytes = strToBytes(f.name);
+      const dataBytes = f.data;
+      const crc = crc32(dataBytes);
+      const localHeader = new Uint8Array([
+        0x50,0x4b,0x03,0x04, 20,0, 0,0, 0,0,
+        ...u16(time), ...u16(date),
+        ...u32(crc), ...u32(dataBytes.length), ...u32(dataBytes.length),
+        ...u16(nameBytes.length), ...u16(0)
+      ]);
+      localParts.push(localHeader, nameBytes, dataBytes);
+      const centralHeader = new Uint8Array([
+        0x50,0x4b,0x01,0x02, 20,0, 20,0, 0,0, 0,0,
+        ...u16(time), ...u16(date),
+        ...u32(crc), ...u32(dataBytes.length), ...u32(dataBytes.length),
+        ...u16(nameBytes.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+        ...u32(0), ...u32(offset)
+      ]);
+      centralParts.push(centralHeader, nameBytes);
+      offset += localHeader.length + nameBytes.length + dataBytes.length;
+    });
+    const centralStart = offset;
+    let centralSize = 0;
+    centralParts.forEach(p=> centralSize += p.length);
+    const eocd = new Uint8Array([
+      0x50,0x4b,0x05,0x06, 0,0,0,0,
+      ...u16(files.length), ...u16(files.length),
+      ...u32(centralSize), ...u32(centralStart),
+      ...u16(0)
+    ]);
+    const allParts = [...localParts, ...centralParts, eocd];
+    let total = 0; allParts.forEach(p=> total += p.length);
+    const out = new Uint8Array(total);
+    let pos = 0;
+    allParts.forEach(p=>{ out.set(p, pos); pos += p.length; });
+    return out;
+  }
+
+  function xmlEscape(s){
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  // Build a single-sheet workbook from headers + row arrays (each cell: {v, t:'n'|'s'})
+  function buildSheetXml(headers, rows){
+    let rowsXml = "";
+    // header row (r=1)
+    rowsXml += `<row r="1">` + headers.map((h,ci)=>
+      `<c r="${colLetter(ci)}1" t="inlineStr"><is><t>${xmlEscape(h)}</t></is></c>`
+    ).join("") + `</row>`;
+    rows.forEach((row, ri)=>{
+      const r = ri+2;
+      rowsXml += `<row r="${r}">` + row.map((cell,ci)=>{
+        const ref = `${colLetter(ci)}${r}`;
+        if (cell.t === "n") return `<c r="${ref}"><v>${cell.v}</v></c>`;
+        return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(cell.v)}</t></is></c>`;
+      }).join("") + `</row>`;
+    });
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>${rowsXml}</sheetData>
+</worksheet>`;
+  }
+  function colLetter(idx){
+    let s = "", n = idx;
+    do { s = String.fromCharCode(65 + (n%26)) + s; n = Math.floor(n/26)-1; } while(n>=0);
+    return s;
+  }
+
+  const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+
+  const RELS_ROOT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  const WORKBOOK_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Detail" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+
+  const WORKBOOK_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+
+  function download(headers, rows, filename){
+    const sheetXml = buildSheetXml(headers, rows);
+    const files = [
+      {name:"[Content_Types].xml", data: strToBytes(CONTENT_TYPES)},
+      {name:"_rels/.rels", data: strToBytes(RELS_ROOT)},
+      {name:"xl/workbook.xml", data: strToBytes(WORKBOOK_XML)},
+      {name:"xl/_rels/workbook.xml.rels", data: strToBytes(WORKBOOK_RELS)},
+      {name:"xl/worksheets/sheet1.xml", data: strToBytes(sheetXml)},
+    ];
+    const zipBytes = buildZip(files);
+    const blob = new Blob([zipBytes], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return { download };
+})();
+
+function exportExcel(){
+  const rows = window._currentMonthRowsForExport || [];
+  const headers = ["เดือน","ปีงบประมาณ","จำนวนทั้งหมด","≤30 วัน","31-60 วัน","61-90 วัน",">90 วัน","% ≤30 วัน","% >30 วัน","AdjRW รวม","AdjRW ≤30 วัน","AdjRW >30 วัน","สถานะ"];
+  const dataRows = rows.map(m=>[
+    {v:m.monthLabel, t:"s"},
+    {v:"FY "+m.fy, t:"s"},
+    {v:m.total, t:"n"},
+    {v:m.le30, t:"n"},
+    {v:m.b3160, t:"n"},
+    {v:m.b6190, t:"n"},
+    {v:m.gt90, t:"n"},
+    {v:Number(m.pctLe30.toFixed(2)), t:"n"},
+    {v:Number(m.pctGt30.toFixed(2)), t:"n"},
+    {v:Number(m.adjTotal.toFixed(2)), t:"n"},
+    {v:Number(m.adjLe30.toFixed(2)), t:"n"},
+    {v:Number(m.adjGt30.toFixed(2)), t:"n"},
+    {v: m.pctLe30>=90?"ดี":(m.pctLe30>=80?"เฝ้าระวัง":"ต้องเร่งแก้ไข"), t:"s"},
+  ]);
+  XlsxWriter.download(headers, dataRows, "ip_submission_timeliness_detail.xlsx");
+}
+
+/* ======================================================================
+   10) RENDER: EARLY WARNING (portfolio-level proxy — see note in UI)
+   ====================================================================== */
+function renderEarlyWarning(filtered){
+  const grid = document.getElementById("ewGrid");
+  const note = document.getElementById("ewNote");
+  if (!filtered.length){
+    grid.innerHTML = "";
+    note.textContent = "ไม่มีข้อมูลตามเงื่อนไขตัวกรองปัจจุบัน";
+    return;
+  }
+  const latest = [...filtered].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)).slice(-1)[0];
+  const cards = [
+    {lbl:"เคสค้าง 31-60 วัน (เฝ้าระวัง/เร่งดำเนินการ)", val:fmtInt(latest.b3160), cls:"warn"},
+    {lbl:"เคสค้าง 61-90 วัน (ใกล้/เกินกำหนดมาก)", val:fmtInt(latest.b6190), cls:"bad"},
+    {lbl:"เคสค้าง มากกว่า 90 วัน (เกินกำหนด)", val:fmtInt(latest.gt90), cls:"bad"},
+    {lbl:"AdjRW ของเคสเสี่ยง (>30 วัน)", val:fmtAdj(latest.adjGt30), cls:"pink"},
+  ];
+  grid.innerHTML = cards.map(c=>`
+    <div class="kpi ${c.cls}">
+      <div class="lbl">${c.lbl}</div>
+      <div class="val">${c.val}</div>
+      <div class="sub">อ้างอิงเดือนล่าสุดตามตัวกรอง: ${latest.monthLabel}</div>
+    </div>`).join("");
+  note.innerHTML = `ตารางรายเคส (HN/AN, วันที่จำหน่าย, จำนวนวันค้าง, AdjRW, สถานะ, ผู้รับผิดชอบ) จะแสดง ณ จุดนี้โดยอัตโนมัติเมื่อไฟล์ต้นทางมีข้อมูลระดับรายเคสพร้อมวันที่จำหน่าย — ปัจจุบันแสดงได้เฉพาะสรุปตามกลุ่มอายุของเดือนล่าสุด (<b>${latest.monthLabel}</b>) เท่านั้น`;
+}
+
+/* ======================================================================
+   11) META, DQ BANNER, FY BADGE
+   ====================================================================== */
+function renderMeta(){
+  const sorted = [...monthly].sort((a,b)=> a.monthKey.localeCompare(b.monthKey));
+  const first = sorted[0], last = sorted[sorted.length-1];
+  document.getElementById("metaStrip").innerHTML = `
+    <div class="meta-chip">ช่วงข้อมูล: <b>${first.monthLabel} – ${last.monthLabel}</b></div>
+    <div class="meta-chip">จำนวน Records: <b>${monthly.length} เดือน</b> (${bucketRows.length} รายการช่วงเวลา)</div>
+    <div class="meta-chip">วันที่ Update Dashboard: <b>${new Date().toLocaleDateString("th-TH",{year:"numeric",month:"long",day:"numeric"})}</b></div>
+    <div class="meta-chip">Fiscal Year ครอบคลุม: <b>${uniqSorted(monthly.map(m=>m.fy)).map(y=>"FY "+y).join(", ")}</b></div>
+  `;
+  const lastFy = last.fy;
+  document.getElementById("fyBadge").textContent = "ปีงบประมาณล่าสุด: FY "+lastFy;
+}
+
+function renderDQBanner(){
+  const el = document.getElementById("dqBanner");
+  if (dqIssues.length===0){
+    el.innerHTML = `<div class="dq-banner dq-ok">✅ <b>Data Validation:</b> ตรวจสอบแล้ว — ไม่พบ Missing Value, ค่าติดลบ, ข้อมูลซ้ำ, รูปแบบเดือนผิดปกติ หรือยอดรวมไม่ตรงกัน (ผลรวม ≤30+31-60+61-90+&gt;90 วัน เท่ากับ Total ทุกเดือน)</div>`;
+  } else {
+    el.innerHTML = `<div class="dq-banner dq-warn">⚠️ <b>Data Quality Warning (${dqIssues.length}):</b> ${dqIssues.join(" | ")}</div>`;
+  }
+}
+
+/* ======================================================================
+   11.5) SECURE IMPORT — pure-JS .xlsx reader (no CDN/library dependency)
+   A hand-written RFC1951 raw DEFLATE decoder + minimal ZIP central-directory
+   parser + XLSX worksheet/sharedStrings parser, ported to run in the browser
+   (TextDecoder instead of Buffer, no require/module.exports). Verified in a
+   Node sandbox byte-for-byte against real Excel-generated compressed data.
+   ====================================================================== */
+function inflateRaw(input){
+  let pos=0, bitBuf=0, bitCnt=0;
+  const output=[];
+  function getBit(){ if(bitCnt===0){ bitBuf=input[pos++]; bitCnt=8; } const b=bitBuf&1; bitBuf>>>=1; bitCnt--; return b; }
+  function getBits(n){ let v=0; for(let i=0;i<n;i++) v|=getBit()<<i; return v; }
+  function buildTree(lengths){
+    const MAXBITS=15; const counts=new Array(MAXBITS+1).fill(0);
+    for(const l of lengths) counts[l]++;
+    counts[0]=0;
+    const offsets=new Array(MAXBITS+2).fill(0);
+    for(let i=1;i<=MAXBITS;i++) offsets[i+1]=offsets[i]+counts[i];
+    const symbols=new Array(lengths.length).fill(0);
+    for(let i=0;i<lengths.length;i++){ if(lengths[i]) symbols[offsets[lengths[i]]++]=i; }
+    return {counts,symbols};
+  }
+  function decodeSymbol(tree){
+    let code=0, first=0, index=0;
+    for(let len=1; len<=15; len++){
+      code|=getBit();
+      const count=tree.counts[len];
+      if(code-first<count) return tree.symbols[index+(code-first)];
+      index+=count; first+=count; first<<=1; code<<=1;
+    }
+    throw new Error("inflate: bad code");
+  }
+  const LEN_BASE=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+  const LEN_EXTRA=[0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+  const DIST_BASE=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+  const DIST_EXTRA=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+  const CLC_ORDER=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
+  let fixedLit=null, fixedDist=null;
+  function getFixedTrees(){
+    if(!fixedLit){
+      const litLens=new Array(288);
+      for(let i=0;i<144;i++) litLens[i]=8;
+      for(let i=144;i<256;i++) litLens[i]=9;
+      for(let i=256;i<280;i++) litLens[i]=7;
+      for(let i=280;i<288;i++) litLens[i]=8;
+      fixedLit=buildTree(litLens);
+      fixedDist=buildTree(new Array(30).fill(5));
+    }
+    return [fixedLit, fixedDist];
+  }
+  function inflateBlockData(litTree, distTree){
+    for(;;){
+      const sym=decodeSymbol(litTree);
+      if(sym<256){ output.push(sym); }
+      else if(sym===256){ return; }
+      else{
+        const li=sym-257;
+        const length=LEN_BASE[li]+getBits(LEN_EXTRA[li]);
+        const dsym=decodeSymbol(distTree);
+        const dist=DIST_BASE[dsym]+getBits(DIST_EXTRA[dsym]);
+        let start=output.length-dist;
+        for(let i=0;i<length;i++) output.push(output[start+i]);
+      }
+    }
+  }
+  function readDynamicTrees(){
+    const hlit=getBits(5)+257, hdist=getBits(5)+1, hclen=getBits(4)+4;
+    const clLens=new Array(19).fill(0);
+    for(let i=0;i<hclen;i++) clLens[CLC_ORDER[i]]=getBits(3);
+    const clTree=buildTree(clLens);
+    const lengths=[];
+    while(lengths.length<hlit+hdist){
+      const sym=decodeSymbol(clTree);
+      if(sym<16){ lengths.push(sym); }
+      else if(sym===16){ const prev=lengths[lengths.length-1]; const rep=getBits(2)+3; for(let i=0;i<rep;i++) lengths.push(prev); }
+      else if(sym===17){ const rep=getBits(3)+3; for(let i=0;i<rep;i++) lengths.push(0); }
+      else{ const rep=getBits(7)+11; for(let i=0;i<rep;i++) lengths.push(0); }
+    }
+    return [buildTree(lengths.slice(0,hlit)), buildTree(lengths.slice(hlit,hlit+hdist))];
+  }
+  let final=0;
+  do{
+    final=getBit();
+    const type=getBits(2);
+    if(type===0){
+      bitBuf=0; bitCnt=0;
+      const len=input[pos]|(input[pos+1]<<8);
+      pos+=4;
+      for(let i=0;i<len;i++) output.push(input[pos++]);
+    } else if(type===1){ const [lit,dist]=getFixedTrees(); inflateBlockData(lit,dist); }
+    else if(type===2){ const [lit,dist]=readDynamicTrees(); inflateBlockData(lit,dist); }
+    else throw new Error("inflate: invalid block type");
+  } while(!final);
+  return Uint8Array.from(output);
+}
+
+function readU16z(b,o){ return b[o]|(b[o+1]<<8); }
+function readU32z(b,o){ return (b[o]|(b[o+1]<<8)|(b[o+2]<<16)|(b[o+3]*0x1000000))>>>0; }
+const _td = new TextDecoder("utf-8");
+
+function parseZip(bytes){
+  let eocd=-1;
+  for(let i=bytes.length-22; i>=0 && i>=bytes.length-22-65557; i--){
+    if(readU32z(bytes,i)===0x06054b50){ eocd=i; break; }
+  }
+  if(eocd<0) throw new Error("zip: EOCD not found (ไฟล์อาจไม่ใช่ .xlsx ที่ถูกต้อง)");
+  const total=readU16z(bytes,eocd+10);
+  let cdOffset=readU32z(bytes,eocd+16);
+  const files={};
+  for(let i=0;i<total;i++){
+    if(readU32z(bytes,cdOffset)!==0x02014b50) throw new Error("zip: bad central directory signature");
+    const method=readU16z(bytes,cdOffset+10);
+    const compSize=readU32z(bytes,cdOffset+20);
+    const uncompSize=readU32z(bytes,cdOffset+24);
+    const nameLen=readU16z(bytes,cdOffset+28);
+    const extraLen=readU16z(bytes,cdOffset+30);
+    const commentLen=readU16z(bytes,cdOffset+32);
+    const localOffset=readU32z(bytes,cdOffset+42);
+    const name=_td.decode(bytes.slice(cdOffset+46, cdOffset+46+nameLen));
+    files[name]={method,compSize,uncompSize,localOffset};
+    cdOffset+=46+nameLen+extraLen+commentLen;
+  }
+  const cache={};
+  return {
+    names:Object.keys(files),
+    read(name){
+      if(cache[name]) return cache[name];
+      const meta=files[name];
+      if(!meta) return null;
+      const lo=meta.localOffset;
+      if(readU32z(bytes,lo)!==0x04034b50) throw new Error("zip: bad local header for "+name);
+      const fnLen=readU16z(bytes,lo+26), exLen=readU16z(bytes,lo+28);
+      const dataStart=lo+30+fnLen+exLen;
+      const raw=bytes.subarray(dataStart, dataStart+meta.compSize);
+      let out;
+      if(meta.method===0) out=raw;
+      else if(meta.method===8) out=inflateRaw(raw);
+      else throw new Error("zip: unsupported compression method "+meta.method+" for "+name);
+      cache[name]=out;
+      return out;
+    }
+  };
+}
+
+function xmlUnescape(s){
+  return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'")
+    .replace(/&#(\d+);/g,(_,d)=>String.fromCodePoint(parseInt(d,10)))
+    .replace(/&#x([0-9a-fA-F]+);/g,(_,h)=>String.fromCodePoint(parseInt(h,16)))
+    .replace(/&amp;/g,"&");
+}
+function parseSharedStrings(xml){
+  if(!xml) return [];
+  const strings=[];
+  const siRe=/<si>([\s\S]*?)<\/si>/g;
+  let m;
+  while((m=siRe.exec(xml))){
+    const inner=m[1];
+    let text="", found=false;
+    const tRe=/<t[^>]*>([\s\S]*?)<\/t>/g;
+    let tm;
+    while((tm=tRe.exec(inner))){ text+=xmlUnescape(tm[1]); found=true; }
+    strings.push(found?text:"");
+  }
+  return strings;
+}
+function colLetterToIndex(ref){
+  const m=ref.match(/^([A-Z]+)/);
+  if(!m) return 0;
+  let n=0;
+  for(const ch of m[1]) n=n*26+(ch.charCodeAt(0)-64);
+  return n-1;
+}
+function parseWorksheetRows(xml, sharedStrings){
+  const rows=[];
+  const rowRe=/<row[^>]*>([\s\S]*?)<\/row>/g;
+  let rm;
+  while((rm=rowRe.exec(xml))){
+    const rowInner=rm[1];
+    const cells=[];
+    const cellRe=/<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g;
+    let cm;
+    while((cm=cellRe.exec(rowInner))){
+      const attrs = cm[1]!==undefined ? cm[1] : cm[3];
+      const inner = cm[2] || "";
+      const refM=attrs.match(/r="([A-Z]+\d+)"/);
+      const typeM=attrs.match(/t="([^"]+)"/);
+      const ref=refM?refM[1]:null;
+      const type=typeM?typeM[1]:"n";
+      let value="";
+      if(type==="inlineStr"){
+        const tM=inner.match(/<t[^>]*>([\s\S]*?)<\/t>/);
+        value=tM?xmlUnescape(tM[1]):"";
+      } else {
+        const vM=inner.match(/<v>([\s\S]*?)<\/v>/);
+        const raw=vM?vM[1]:"";
+        if(type==="s"){ const idx=parseInt(raw,10); value=sharedStrings[idx]!==undefined?sharedStrings[idx]:""; }
+        else if(type==="str"||type==="b"||type==="e"){ value=xmlUnescape(raw); }
+        else { value=raw; }
+      }
+      cells.push({col: ref?colLetterToIndex(ref):cells.length, value});
+    }
+    const rowArr=[];
+    cells.forEach(c=>{ rowArr[c.col]=c.value; });
+    rows.push(rowArr);
+  }
+  return rows;
+}
+function parseRelsForSheet(relsXml, targetId){
+  const re=new RegExp('<Relationship[^>]*Id="'+targetId+'"[^>]*Target="([^"]+)"');
+  const m=relsXml.match(re) || relsXml.match(new RegExp('<Relationship[^>]*Target="([^"]+)"[^>]*Id="'+targetId+'"'));
+  return m?m[1]:null;
+}
+function parseXlsxFirstSheet(bytes){
+  const zip=parseZip(bytes);
+  const workbookXml=_td.decode(zip.read("xl/workbook.xml"));
+  const relsXml=_td.decode(zip.read("xl/_rels/workbook.xml.rels"));
+  const sharedStringsXml = zip.names.includes("xl/sharedStrings.xml") ? _td.decode(zip.read("xl/sharedStrings.xml")) : null;
+  const sharedStrings=parseSharedStrings(sharedStringsXml);
+  const sheetM=workbookXml.match(/<sheet\b[^>]*\/?>/);
+  if(!sheetM) throw new Error("xlsx: ไม่พบชีตในไฟล์ (no <sheet> in workbook.xml)");
+  const ridM=sheetM[0].match(/r:id="([^"]+)"/);
+  const rid=ridM?ridM[1]:"rId1";
+  let target=parseRelsForSheet(relsXml, rid);
+  if(!target) throw new Error("xlsx: ไม่สามารถหาชีตจากไฟล์ rels ได้");
+  if(!target.startsWith("/") && !target.startsWith("xl/")) target="xl/"+target;
+  else if(target.startsWith("/")) target=target.slice(1);
+  const sheetXml=_td.decode(zip.read(target));
+  return parseWorksheetRows(sheetXml, sharedStrings);
+}
+
+/* ======================================================================
+   11.6) SECURE IMPORT — Gmail-gated auth + merge/rebuild logic
+   ====================================================================== */
+// vvv แก้ตรงนี้: ใส่ Google OAuth Client ID ของคุณ (จาก Google Cloud Console > Credentials) vvv
+const GOOGLE_CLIENT_ID = ""; // เช่น "123456789-abc.apps.googleusercontent.com" — เว้นว่างไว้ = ใช้โหมดกรอกอีเมลเองอัตโนมัติ
+const APPROVED_EMAILS = ["tvpwork@gmail.com"]; // เพิ่มอีเมลที่ได้รับอนุมัติเพิ่มเติมได้ที่นี่ (ไม่สนตัวพิมพ์เล็ก-ใหญ่)
+const ORIGINAL_RAW_ROWS = parseCsv(RAW_CSV);
+let currentUserEmail = null;
+let currentUserVia = null; // "google" | "manual"
+try { currentUserEmail = sessionStorage.getItem("ipd_dash_user") || null; currentUserVia = sessionStorage.getItem("ipd_dash_via") || null; } catch(e){}
+
+function isApproved(email){
+  const e=(email||"").trim().toLowerCase();
+  return APPROVED_EMAILS.map(x=>x.toLowerCase()).includes(e);
+}
+function renderAuthUI(){
+  const statusEl=document.getElementById("authStatus");
+  const loginBox=document.getElementById("loginBox");
+  const importBox=document.getElementById("importBox");
+  if(currentUserEmail && isApproved(currentUserEmail)){
+    const viaLabel = currentUserVia==="google" ? "Google Sign-In" : "กรอกอีเมลด้วยตนเอง";
+    statusEl.innerHTML = `✅ เข้าสู่ระบบแล้ว: <b>${currentUserEmail}</b> <span style="font-weight:600;color:var(--gray);">(${viaLabel})</span>`;
+    loginBox.style.display="none";
+    importBox.style.display="block";
+  } else {
+    statusEl.textContent = "ยังไม่ได้เข้าสู่ระบบ";
+    loginBox.style.display="block";
+    importBox.style.display="none";
+  }
+}
+
+/* ---- Real Google Sign-In (Google Identity Services) ---- */
+function decodeJwtPayload(token){
+  const base64Url = token.split(".")[1];
+  const base64 = base64Url.replace(/-/g,"+").replace(/_/g,"/");
+  const json = decodeURIComponent(
+    atob(base64).split("").map(c=>"%"+("00"+c.charCodeAt(0).toString(16)).slice(-2)).join("")
+  );
+  return JSON.parse(json);
+}
+function handleGoogleCredential(response){
+  const noticeEl = document.getElementById("gsiNotice");
+  try{
+    const payload = decodeJwtPayload(response.credential);
+    const email = (payload.email||"").trim();
+    if(!payload.email_verified){
+      noticeEl.innerHTML = '<span class="msg-err">อีเมลนี้ยังไม่ได้ยืนยันกับ Google กรุณาใช้บัญชีอื่น</span>';
+      return;
+    }
+    if(!isApproved(email)){
+      noticeEl.innerHTML = `<span class="msg-err">บัญชี ${email} ไม่ได้รับอนุมัติให้นำเข้าข้อมูล กรุณาติดต่อผู้ดูแลระบบ (tvpwork@gmail.com)</span>`;
+      return;
+    }
+    currentUserEmail = email;
+    currentUserVia = "google";
+    try{ sessionStorage.setItem("ipd_dash_user", email); sessionStorage.setItem("ipd_dash_via","google"); }catch(e){}
+    noticeEl.innerHTML = "";
+    renderAuthUI();
+  }catch(err){
+    noticeEl.innerHTML = '<span class="msg-err">ไม่สามารถอ่านข้อมูลบัญชี Google ได้ กรุณาลองใหม่ หรือใช้การกรอกอีเมลด้วยตนเองแทน</span>';
+  }
+}
+function showFallbackOnly(message){
+  const gsiArea = document.getElementById("gsiArea");
+  const notice = document.getElementById("gsiNotice");
+  const fb = document.getElementById("fallbackLogin");
+  if(gsiArea) gsiArea.style.display = "none";
+  if(notice) notice.innerHTML = message ? `<span style="color:var(--gray);font-weight:600;">${message}</span>` : "";
+  if(fb) fb.open = true;
+}
+function initGoogleSignIn(){
+  window.__initGoogleSignInReady = true;
+  if(!GOOGLE_CLIENT_ID){
+    showFallbackOnly("ยังไม่ได้ตั้งค่า Google Client ID สำหรับ Dashboard นี้ — ใช้การกรอกอีเมลด้วยตนเองแทนได้");
+    return;
+  }
+  if(window.location.protocol === "file:"){
+    showFallbackOnly("เปิดไฟล์นี้แบบ file:// — Google Sign-In จริงใช้งานไม่ได้กับการเปิดไฟล์โดยตรง ต้องเผยแพร่เป็น URL http/https ก่อน จึงสลับมาใช้การกรอกอีเมลด้วยตนเองแทน");
+    return;
+  }
+  if(window.__gsiFailed){ handleGSILoadError(); return; }
+  if(!window.__gsiLoaded){ return; } // will retry via script onload callback
+  try{
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential,
+      auto_select: false,
+    });
+    const btnEl = document.getElementById("googleSignInBtn");
+    document.getElementById("gsiArea").style.display = "block";
+    google.accounts.id.renderButton(btnEl, {theme:"outline", size:"large", text:"signin_with", shape:"pill", locale:"th"});
+  }catch(err){
+    showFallbackOnly("Google Sign-In เริ่มการทำงานไม่สำเร็จ (ตรวจสอบ Authorized JavaScript origins ของ Client ID) — ใช้การกรอกอีเมลด้วยตนเองแทนได้");
+  }
+}
+function handleGSILoadError(){
+  window.__initGoogleSignInReady = true;
+  showFallbackOnly("ไม่สามารถโหลด Google Sign-In ได้ (เครือข่ายอาจบล็อก accounts.google.com) — ใช้การกรอกอีเมลด้วยตนเองแทนได้");
+}
+
+/* ---- Manual-email fallback (soft gate) ---- */
+function handleLogin(){
+  const input=document.getElementById("gmailInput");
+  const msgEl=document.getElementById("loginMsg");
+  const email=(input.value||"").trim();
+  if(!/^[^\s@]+@gmail\.com$/i.test(email)){
+    msgEl.innerHTML='<span class="msg-err">กรุณากรอกอีเมล Gmail ที่ถูกต้อง (ต้องลงท้ายด้วย @gmail.com)</span>';
+    return;
+  }
+  if(!isApproved(email)){
+    msgEl.innerHTML='<span class="msg-err">อีเมลนี้ไม่ได้รับอนุมัติให้นำเข้าข้อมูล กรุณาติดต่อผู้ดูแลระบบ (tvpwork@gmail.com)</span>';
+    return;
+  }
+  currentUserEmail=email;
+  currentUserVia="manual";
+  try{ sessionStorage.setItem("ipd_dash_user", email); sessionStorage.setItem("ipd_dash_via","manual"); }catch(e){}
+  msgEl.innerHTML="";
+  renderAuthUI();
+}
+function handleLogout(){
+  currentUserEmail=null;
+  currentUserVia=null;
+  try{ sessionStorage.removeItem("ipd_dash_user"); sessionStorage.removeItem("ipd_dash_via"); }catch(e){}
+  try{ if(window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect(); }catch(e){}
+  const gi=document.getElementById("gmailInput"); if(gi) gi.value="";
+  const im=document.getElementById("importMsg"); if(im) im.innerHTML="";
+  renderAuthUI();
+}
+function validateHeaders(headers){
+  const norm=headers.map(h=>(h||"").toString().trim());
+  const missing=REQUIRED_HEADERS.filter(h=>!norm.includes(h));
+  const extra=norm.filter(h=>h && !REQUIRED_HEADERS.includes(h));
+  return {ok: missing.length===0, missing, extra};
+}
+function xlsxRowsToObjects(rows){
+  const headers=(rows[0]||[]).map(h=> (h===undefined||h===null) ? "" : String(h).trim());
+  return rows.slice(1)
+    .filter(r=> r && r.some(c=> c!==undefined && c!==null && String(c).trim()!==""))
+    .map(r=>{
+      const obj={};
+      headers.forEach((h,i)=>{ obj[h] = (r[i]===undefined||r[i]===null) ? "" : String(r[i]).trim(); });
+      return obj;
+    });
+}
+function mergeRows(existingRows, importedRows){
+  const map=new Map();
+  existingRows.forEach(r=> map.set(String(r["เดือนที่ส่ง"]).trim(), r));
+  let added=0, updated=0;
+  importedRows.forEach(r=>{
+    const key=String(r["เดือนที่ส่ง"]||"").trim();
+    if(!key) return;
+    if(map.has(key)) updated++; else added++;
+    map.set(key, r);
+  });
+  return {merged: Array.from(map.values()), added, updated};
+}
+function rebuildAfterDataChange(){
+  buildDataModel(rawRows);
+  state.fy.clear(); state.month.clear(); state.quarter.clear(); state.bucket.clear(); state.status.clear();
+  renderFilterBar();
+  renderMeta();
+  renderDQBanner();
+  renderAll();
+}
+async function handleImportFile(){
+  const fileInput=document.getElementById("importFile");
+  const msgEl=document.getElementById("importMsg");
+  const file=fileInput.files[0];
+  if(!file){ msgEl.innerHTML='<span class="msg-err">กรุณาเลือกไฟล์ก่อน</span>'; return; }
+  msgEl.innerHTML="⏳ กำลังประมวลผลไฟล์...";
+  try{
+    const buf=await file.arrayBuffer();
+    const bytes=new Uint8Array(buf);
+    const isXlsx = /\.xlsx$/i.test(file.name) || (bytes[0]===0x50 && bytes[1]===0x4B);
+    let importedObjs;
+    if(isXlsx){
+      const rows=parseXlsxFirstSheet(bytes);
+      if(!rows.length) throw new Error("ไม่พบข้อมูลในไฟล์ Excel");
+      const headers=(rows[0]||[]).map(h=> h===undefined||h===null ? "" : String(h).trim());
+      const v=validateHeaders(headers);
+      if(!v.ok) throw new Error("คอลัมน์ไม่ตรงกับต้นฉบับ ขาดคอลัมน์: "+v.missing.join(", "));
+      importedObjs=xlsxRowsToObjects(rows);
+    } else {
+      let text=_td.decode(bytes);
+      if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+      const headerLine=(text.trim().split("\n")[0])||"";
+      const headers=headerLine.split(",").map(h=>h.trim());
+      const v=validateHeaders(headers);
+      if(!v.ok) throw new Error("คอลัมน์ไม่ตรงกับต้นฉบับ ขาดคอลัมน์: "+v.missing.join(", "));
+      importedObjs=parseCsv(text);
+    }
+    importedObjs=importedObjs.filter(o=> o["เดือนที่ส่ง"] && String(o["เดือนที่ส่ง"]).trim()!=="");
+    if(!importedObjs.length) throw new Error('ไม่พบแถวข้อมูลที่ถูกต้องในไฟล์ (คอลัมน์ "เดือนที่ส่ง" ว่างทุกแถว)');
+    const {merged, added, updated} = mergeRows(rawRows, importedObjs);
+    rawRows = merged;
+    rebuildAfterDataChange();
+    msgEl.innerHTML = `<span class="msg-ok">✅ นำเข้าสำเร็จ: เพิ่มใหม่ ${added} เดือน, อัปเดตทับ ${updated} เดือน (รวมทั้งหมดตอนนี้ ${monthly.length} เดือน)</span>`;
+    fileInput.value="";
+  } catch(err){
+    msgEl.innerHTML = '<span class="msg-err">❌ นำเข้าไม่สำเร็จ: '+(err && err.message ? err.message : err)+'</span>';
+  }
+}
+function handleResetData(){
+  rawRows = ORIGINAL_RAW_ROWS.map(r=>({...r}));
+  rebuildAfterDataChange();
+  const msgEl=document.getElementById("importMsg");
+  if(msgEl) msgEl.innerHTML = '<span class="msg-ok">↺ กลับไปใช้ข้อมูลต้นฉบับแล้ว</span>';
+}
+
+/* ======================================================================
+   12) MASTER RENDER
+   ====================================================================== */
+function renderAll(){
+  const filtered = monthly.filter(monthMatchesFilter);
+  const filteredBuckets = bucketRows.filter(bucketRowMatchesFilter);
+  const kpi = renderKPI(filtered);
+  renderAlerts(kpi, filtered);
+  renderCharts(filtered);
+  renderInsight(kpi, filtered);
+  renderBucketTable(filteredBuckets);
+  renderMonthTable(filtered);
+  renderEarlyWarning(filtered);
+}
+
+/* ======================================================================
+   13) INIT
+   ====================================================================== */
+function init(){
+  renderMeta();
+  renderDQBanner();
+  renderFilterBar();
+  setupTableSorting();
+  renderAll();
+  renderAuthUI();
+  document.getElementById("btnLogin").addEventListener("click", handleLogin);
+  document.getElementById("gmailInput").addEventListener("keydown", e=>{ if(e.key==="Enter") handleLogin(); });
+  document.getElementById("btnLogout").addEventListener("click", handleLogout);
+  document.getElementById("btnImport").addEventListener("click", handleImportFile);
+  document.getElementById("btnResetData").addEventListener("click", handleResetData);
+  initGoogleSignIn(); // no-op / shows fallback notice if GIS script hasn't loaded yet — its own onload/onerror will call this again
+  document.getElementById("footerNote").innerHTML = `
+    แหล่งข้อมูล: ระยะเวลาการส่งข้อมูลผู้ป่วยในแยกรายเดือนที่ส่งข้อมูล (IP01,IP02).xlsx — Sheet1 &nbsp;•&nbsp;
+    ตัวเลขทั้งหมดบน KPI / กราฟ / ตาราง / Insight คำนวณจาก Dataset ชุดเดียวกันแบบเรียลไทม์ตามตัวกรองที่เลือก &nbsp;•&nbsp;
+    IP Claim Submission Timeliness Dashboard
+  `;
+  let resizeTimer;
+  window.addEventListener("resize", ()=>{
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(()=> renderCharts(monthly.filter(monthMatchesFilter)), 150);
+  });
+}
+init();
+</script>
+</body>
+</html>
