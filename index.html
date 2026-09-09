@@ -61,7 +61,12 @@
   ::-webkit-scrollbar-thumb{background:#c3cedf;border-radius:20px;}
   ::-webkit-scrollbar-thumb:hover{background:#a8b7cf;}
   @keyframes fadeUp{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
-  .wrap > *{animation:fadeUp .4s ease both;}
+  /* หมายเหตุสำคัญ: ห้ามใส่ "both"/"forwards" ตรงนี้ — ถ้าใส่ Animation จะค้าง transform:translateY(0)
+     (ซึ่งแม้ค่าจะเท่ากับ 0 ก็ยังนับเป็น "มีค่า transform" ไม่ใช่ none) ทำให้ทุก section ใต้ .wrap
+     กลายเป็น Stacking Context ถาวร และ section ที่มาทีหลัง (เช่น KPI) จะวาดทับ Dropdown ของตัวกรอง
+     ที่อยู่ก่อนหน้าเสมอ แม้ Dropdown จะตั้ง z-index สูงกว่าก็ตาม (บั๊กที่เจอจริงและแก้แล้ว)
+     พอไม่ใส่ fill-mode เมื่อ Animation จบ (0.4s) องค์ประกอบจะกลับไปใช้ transform:none ตามปกติ ไม่ค้างปัญหานี้ */
+  .wrap > *{animation:fadeUp .4s ease;}
 
   /* CARD SYSTEM */
   .card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;
@@ -778,6 +783,36 @@ function bucketRowMatchesFilter(br){
   if (state.bucket.size && !state.bucket.has(br.bucketKey)) return false;
   if (state.status.size && !state.status.has(br.status)) return false;
   return true;
+}
+
+// ตัวกรอง "ช่วงระยะเวลาการส่งข้อมูล" และ "สถานะส่งทัน/ส่งล่าช้า" เป็นตัวกรองระดับ bucket (≤30/31-60/61-90/>90 วัน)
+// ในขณะที่ KPI/กราฟ/Insight/ตารางหลัก คำนวณจาก "monthly" (ยอดรวมทั้งเดือน) — ถ้าไม่คำนวณ monthly ใหม่ตามตัวกรองนี้
+// การเลือกตัวกรองนี้จะไม่มีผลกับ KPI/กราฟเลย (บั๊กที่พบ) ฟังก์ชันนี้คำนวณ monthly ใหม่โดยรวมเฉพาะ bucket ที่ตรงกับตัวกรองปัจจุบัน
+// แล้วปรับ total/le30/gt30/AdjRW ทั้งหมดใหม่ ให้ KPI ทุกตัว กราฟทุกตัว Insight และตารางเปลี่ยนตามตัวกรองนี้ได้จริง
+function activeBucketKeys(){
+  return BUCKET_DEFS.filter(b=>{
+    if (state.bucket.size && !state.bucket.has(b.key)) return false;
+    if (state.status.size && !state.status.has(b.status)) return false;
+    return true;
+  }).map(b=>b.key);
+}
+function getFilteredMonthly(){
+  const base = monthly.filter(monthMatchesFilter);
+  if (state.bucket.size === 0 && state.status.size === 0) return base; // ไม่มีตัวกรองระดับ bucket — ใช้ยอดรวมเดิมตรงๆ (เร็วกว่า และพฤติกรรมเดิมไม่เปลี่ยน)
+  const active = new Set(activeBucketKeys());
+  return base.map(m=>{
+    const nm = {...m};
+    BUCKET_DEFS.forEach(b=>{
+      if (!active.has(b.key)){ nm[b.countField] = 0; nm[b.adjField] = 0; }
+    });
+    const total = BUCKET_DEFS.reduce((s,b)=> s + nm[b.countField], 0);
+    const adjTotal = BUCKET_DEFS.reduce((s,b)=> s + nm[b.adjField], 0);
+    const gt30 = total - nm.le30, adjGt30 = adjTotal - nm.adjLe30;
+    nm.total = total; nm.adjTotal = adjTotal; nm.gt30 = gt30; nm.adjGt30 = adjGt30;
+    nm.pctLe30 = total ? (nm.le30/total*100) : 0;
+    nm.pctGt30 = total ? (gt30/total*100) : 0;
+    return nm;
+  });
 }
 
 /* ======================================================================
@@ -2170,7 +2205,7 @@ function renderDeleteFySelect(){
    12) MASTER RENDER
    ====================================================================== */
 function renderAll(){
-  const filtered = monthly.filter(monthMatchesFilter);
+  const filtered = getFilteredMonthly();
   const filteredBuckets = bucketRows.filter(bucketRowMatchesFilter);
   const kpi = renderKPI(filtered);
   renderAlerts(kpi, filtered);
@@ -2215,7 +2250,7 @@ function init(){
   let resizeTimer;
   window.addEventListener("resize", ()=>{
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(()=> renderCharts(monthly.filter(monthMatchesFilter)), 150);
+    resizeTimer = setTimeout(()=> renderCharts(getFilteredMonthly()), 150);
   });
 }
 // รอโหลดทั้งรายชื่ออีเมลอนุมัติ (approved-emails.json) และชุดข้อมูลจริงล่าสุด (dashboard-data.json) จาก GitHub ก่อน
