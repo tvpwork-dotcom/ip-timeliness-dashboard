@@ -170,9 +170,15 @@
   .insight-secondary{color:var(--secondary);font-weight:700;}
 
   /* CHARTS */
-  .chart-wrap{position:relative;width:100%;}
+  .chart-wrap{position:relative;width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;}
   .h-320{height:320px;} .h-300{height:300px;} .h-280{height:280px;}
   .svgchart{width:100%;height:100%;display:block;overflow:visible;}
+  /* บนจอแคบ (มือถือ) ถ้าจำนวนจุด/แท่งมากเกินไปจนตัวหนังสือชนกัน สคริปต์จะขยายความกว้าง SVG จริง
+     เกินความกว้างของ .chart-wrap แล้วให้ผู้ใช้เลื่อนดูแนวนอนแทน (ดู drawLineChart/drawStackedColumnChart) */
+  .chart-scroll-hint{display:none;font-size:11px;color:var(--text-muted);text-align:center;margin-top:2px;}
+  @media (max-width:720px){
+    .chart-scroll-hint.show{display:block;}
+  }
   .svgchart .axis-line{stroke:var(--border);stroke-width:1;}
   .svgchart .grid-line{stroke:#EEF2F7;stroke-width:1;}
   .svgchart .axis-text{fill:#1E293B;font-size:12.5px;font-weight:700;}
@@ -192,6 +198,9 @@
   .row-2{grid-template-columns:1.4fr 1fr;}
   .row-2b{grid-template-columns:1fr 1fr;}
   @media(max-width:980px){.row-2,.row-2b{grid-template-columns:1fr;}}
+  /* กันไม่ให้กราฟที่ขยายความกว้างเกินพื้นที่ (เพื่อเลื่อนดูบนมือถือ) ไปดันให้ Grid Column ทั้งแถวกว้างตาม
+     ค่าเริ่มต้นของ Grid item คือ min-width:auto (ยึดตามเนื้อหาข้างในที่กว้างที่สุด) ต้องบังคับเป็น 0 ที่นี่ */
+  .row > .card{min-width:0;}
 
   /* TABLE */
   .table-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;}
@@ -392,6 +401,7 @@
       <h3>📈 แนวโน้มการส่งข้อมูลผู้ป่วยในภายใน 30 วัน</h3>
       <p class="desc">Monthly Timeliness Trend — % ส่งภายใน 30 วันต่อเดือน เทียบเป้าหมาย 90% (คลิกจุดบนกราฟเพื่อ Drill-down รายเดือน)</p>
       <div class="chart-wrap h-320" id="chartTrend"></div>
+      <div class="chart-scroll-hint" id="chartTrendHint">👉 เลื่อนซ้าย-ขวาเพื่อดูทุกเดือน</div>
     </div>
     <div class="card card-top-orange">
       <h3>🚩 เดือนที่มีสัดส่วนส่งล่าช้าสูงสุด</h3>
@@ -406,6 +416,7 @@
       <h3>📊 โครงสร้างระยะเวลาการส่งข้อมูลรายเดือน</h3>
       <p class="desc">100% Stacked Column — สัดส่วนแต่ละช่วงเวลาต่อเดือน (ดูว่าเคสย้ายไปกลุ่มใดเมื่อ Performance ลดลง)</p>
       <div class="chart-wrap h-300" id="chartStack"></div>
+      <div class="chart-scroll-hint" id="chartStackHint">👉 เลื่อนซ้าย-ขวาเพื่อดูทุกเดือน</div>
     </div>
     <div class="card card-top-purple">
       <h3>⚖️ เปรียบเทียบสัดส่วนจำนวนครั้งและ AdjRW ตามระยะเวลาการส่ง</h3>
@@ -803,8 +814,13 @@ function legendHtml(items){
 function drawLineChart(container, labels, values, opts){
   opts = opts || {};
   container.innerHTML = "";
-  const W = container.clientWidth || 600, H = (container.clientHeight || 320) - (opts.legend? 24:0);
-  const marginL=40, marginR=16, marginT=22, marginB=32;
+  const containerW = container.clientWidth || 600;
+  // จองพื้นที่ขั้นต่ำต่อเดือน กันป้ายกำกับ/ตัวเลขบนกราฟชนกันเมื่อมีหลายเดือนบนจอแคบ (มือถือ)
+  // ถ้าจำเป็นต้องกว้างกว่าพื้นที่จริง จะเปิดให้เลื่อนแนวนอนแทนการบีบตัวหนังสือ
+  const minPerPoint = 58;
+  const W = Math.max(containerW, labels.length * minPerPoint);
+  const H = (container.clientHeight || 320) - (opts.legend? 24:0);
+  const marginL=40, marginR=16, marginT=26, marginB=32;
   const plotW = W - marginL - marginR, plotH = H - marginT - marginB;
   const svg = svgEl("svg",{class:"svgchart", viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:"none"});
   const yMax = opts.yMax !== undefined ? opts.yMax : Math.max(...values,10)*1.15;
@@ -868,12 +884,21 @@ function drawLineChart(container, labels, values, opts){
     }
   });
 
+  svg.style.width = W + "px";
+  svg.style.height = H + "px";
   container.appendChild(svg);
   if (opts.legend) {
     const lg = document.createElement("div");
     lg.innerHTML = legendHtml(opts.legend);
     container.appendChild(lg.firstChild);
   }
+  toggleChartScrollHint(container, W > containerW);
+}
+
+/* แสดง/ซ่อนคำแนะนำ "เลื่อนซ้าย-ขวา" ใต้กราฟที่กว้างเกินพื้นที่จอ (ส่วนใหญ่เจอบนมือถือ) */
+function toggleChartScrollHint(container, needsScroll){
+  const hint = document.getElementById(container.id + "Hint");
+  if(hint) hint.classList.toggle("show", !!needsScroll);
 }
 
 /* Horizontal bar chart with click drill-down + top-N highlight */
@@ -914,7 +939,9 @@ function drawStackedColumnChart(container, labels, series, opts){
   // series: [{label,color,data:[percentages per label]}]
   opts = opts || {};
   container.innerHTML = "";
-  const W = container.clientWidth || 600, H = (container.clientHeight || 300) - 30;
+  const containerW = container.clientWidth || 600;
+  const minPerPoint = 55; // กันป้ายเดือนชนกันบนจอแคบ — ดูคำอธิบายเดียวกับ drawLineChart
+  const W = Math.max(containerW, labels.length * minPerPoint), H = (container.clientHeight || 300) - 30;
   const marginL=38, marginR=12, marginT=10, marginB=30;
   const plotW = W - marginL - marginR, plotH = H - marginT - marginB;
   const svg = svgEl("svg",{class:"svgchart", viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:"none"});
@@ -944,10 +971,13 @@ function drawStackedColumnChart(container, labels, series, opts){
     const t = svgEl("text",{class:"axis-text",x:cx,y:H+2,"text-anchor":"middle"}); t.textContent = lab;
     svg.appendChild(t);
   });
+  svg.style.width = W + "px";
+  svg.style.height = (H+30) + "px";
   container.appendChild(svg);
   const lg = document.createElement("div");
   lg.innerHTML = legendHtml(series.map(s=>({color:s.color,label:s.label})));
   container.appendChild(lg.firstChild);
+  toggleChartScrollHint(container, W > containerW);
 }
 
 /* Clustered (grouped) vertical bar chart */
