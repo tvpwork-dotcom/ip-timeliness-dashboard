@@ -234,6 +234,20 @@
   .fallback-login summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--primary);}
   .fallback-login summary::marker{color:var(--primary);}
   #gsiNotice:empty{display:none;}
+
+  /* ADMIN PANEL — email allow-list management, GitHub-API backed */
+  .admin-panel{margin-top:18px;padding-top:16px;border-top:2px dashed var(--border);}
+  .admin-panel-title{font-size:15px;font-weight:800;color:var(--text-dark);margin-bottom:10px;}
+  .admin-email-list{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;}
+  .email-pill{display:inline-flex;align-items:center;gap:7px;background:#F1F5F9;border:1px solid var(--border);
+    border-radius:20px;padding:6px 12px;font-size:12.5px;font-weight:600;color:var(--text-dark);}
+  .email-pill b{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:2px 7px;border-radius:10px;}
+  .email-pill.pill-admin{background:#EFF6FF;border-color:#BFDBFE;}
+  .email-pill.pill-admin b{background:var(--primary);color:#fff;}
+  .email-pill.pill-static b{background:#E2E8F0;color:var(--text-muted);}
+  .pill-x{border:none;background:#FEE2E2;color:#B91C1C;width:19px;height:19px;border-radius:50%;font-weight:800;
+    cursor:pointer;line-height:1;font-size:13px;padding:0;}
+  .pill-x:hover{background:#FECACA;}
   .msg-ok{color:var(--good);}
   .msg-err{color:var(--bad);}
   .btn-primary{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 4px 12px rgba(59,130,246,0.3);}
@@ -321,6 +335,23 @@
         และจะ<b>อัปเดตทับเฉพาะเดือนที่ซ้ำ (ตามคอลัมน์ "เดือนที่ส่ง")</b> ส่วนเดือนใหม่จะถูกเพิ่มเข้าไปในชุดข้อมูลโดยอัตโนมัติ — KPI/กราฟ/ตาราง/Insight ทั้งหมดจะคำนวณใหม่ทันที
       </div>
       <div id="importMsg" class="import-msg"></div>
+    </div>
+
+    <div id="adminPanel" class="admin-panel" style="display:none">
+      <div class="admin-panel-title">🔑 จัดการสิทธิ์ผู้ใช้ (เฉพาะผู้ดูแลระบบ)</div>
+      <div class="note-box" style="margin-top:0">
+        เพิ่ม/ลบ Gmail ที่อนุญาตให้นำเข้าข้อมูลได้ — การเปลี่ยนแปลงจะถูกบันทึกลง Repo บน GitHub (ไฟล์ <code>approved-emails.json</code>) ผ่าน GitHub API และมีผลกับทุกคนที่เปิด Dashboard นี้โดยอัตโนมัติ (ใช้เวลาประมาณ 1 นาทีให้เว็บไซต์ Build ใหม่)<br>
+        <b>ต้องใช้ GitHub Personal Access Token</b> (แนะนำสร้างแบบ Fine-grained จำกัดสิทธิ์เฉพาะ Repo นี้ ให้สิทธิ์ Contents: Read and write เท่านั้น และตั้งวันหมดอายุสั้นๆ) — Token จะถูกเก็บไว้ในหน่วยความจำของเบราว์เซอร์นี้เท่านั้นระหว่างที่ใช้งาน ไม่ถูกบันทึกลงไฟล์หรือส่งไปที่ใดนอกจาก GitHub API โดยตรง
+      </div>
+      <div class="login-row">
+        <input type="password" id="githubTokenInput" placeholder="GitHub Personal Access Token (ghp_... หรือ github_pat_...)" style="flex:1;min-width:280px;" autocomplete="off" />
+      </div>
+      <div id="adminEmailList" class="admin-email-list"></div>
+      <div class="login-row" style="margin-top:10px">
+        <input type="email" id="newApprovedEmailInput" placeholder="เพิ่มอีเมล Gmail ใหม่ เช่น name@gmail.com" />
+        <button class="btn btn-primary" id="btnAddEmail">➕ เพิ่มสิทธิ์</button>
+      </div>
+      <div id="adminMsg" class="import-msg"></div>
     </div>
   </div>
 
@@ -1686,27 +1717,61 @@ function parseXlsxFirstSheet(bytes){
    11.6) SECURE IMPORT — Gmail-gated auth + merge/rebuild logic
    ====================================================================== */
 // vvv แก้ตรงนี้: ใส่ Google OAuth Client ID ของคุณ (จาก Google Cloud Console > Credentials) vvv
-const GOOGLE_CLIENT_ID = ""; // เช่น "123456789-abc.apps.googleusercontent.com" — เว้นว่างไว้ = ใช้โหมดกรอกอีเมลเองอัตโนมัติ
-const APPROVED_EMAILS = ["tvpwork@gmail.com"]; // เพิ่มอีเมลที่ได้รับอนุมัติเพิ่มเติมได้ที่นี่ (ไม่สนตัวพิมพ์เล็ก-ใหญ่)
+const GOOGLE_CLIENT_ID = "106451844327-7je962aasvi2niomo5l90dscb2qibipc.apps.googleusercontent.com"; // Client ID จาก Google Cloud Console (Authorized origin: https://tvpwork-dotcom.github.io)
+const APPROVED_EMAILS = ["tvpwork@gmail.com"]; // อีเมลที่อนุมัติแบบฝังในไฟล์ (ใช้งานได้เสมอ แม้ GitHub API โหลดไม่สำเร็จ) — แก้ไขได้ที่นี่โดยตรงเช่นเดิม
+const ROOT_ADMIN_EMAILS = ["tvpwork@gmail.com"]; // ผู้ดูแลระบบตัวจริง — เห็นแผงจัดการสิทธิ์ผู้ใช้ และแก้ไขไม่ได้ผ่าน GUI (กันล็อกตัวเองออกจากระบบ)
+// ที่อยู่ Repo บน GitHub ที่ใช้เก็บรายชื่ออีเมลที่อนุมัติแบบไดนามิก (แก้ไขได้ผ่าน GUI โดยไม่ต้องแก้โค้ด)
+const GITHUB_OWNER = "tvpwork-dotcom";
+const GITHUB_REPO = "Repository-name-";
+const GITHUB_BRANCH = "main";
+const EMAILS_FILE_PATH = "approved-emails.json";
+
 const ORIGINAL_RAW_ROWS = parseCsv(RAW_CSV);
 let currentUserEmail = null;
 let currentUserVia = null; // "google" | "manual"
 try { currentUserEmail = sessionStorage.getItem("ipd_dash_user") || null; currentUserVia = sessionStorage.getItem("ipd_dash_via") || null; } catch(e){}
 
+// รายชื่ออีเมลที่อนุมัติแบบไดนามิก — โหลดจาก approved-emails.json ในเว็บไซต์เดียวกัน (same-origin, ไม่มี rate limit)
+let dynamicApprovedEmails = [];
+const approvedEmailsReady = (async () => {
+  try{
+    const res = await fetch("./" + EMAILS_FILE_PATH, {cache:"no-store"});
+    if(res.ok){
+      const data = await res.json();
+      if(Array.isArray(data.emails)) dynamicApprovedEmails = data.emails;
+    }
+  }catch(e){ /* offline / เปิดแบบ file:// / ยังไม่เคยสร้างไฟล์ — ใช้ APPROVED_EMAILS/ROOT_ADMIN_EMAILS ที่ฝังในไฟล์แทน */ }
+})();
+
+function isRootAdmin(email){
+  const e=(email||"").trim().toLowerCase();
+  return ROOT_ADMIN_EMAILS.map(x=>x.toLowerCase()).includes(e);
+}
 function isApproved(email){
   const e=(email||"").trim().toLowerCase();
-  return APPROVED_EMAILS.map(x=>x.toLowerCase()).includes(e);
+  if(ROOT_ADMIN_EMAILS.map(x=>x.toLowerCase()).includes(e)) return true;
+  if(APPROVED_EMAILS.map(x=>x.toLowerCase()).includes(e)) return true;
+  if(dynamicApprovedEmails.map(x=>(x||"").toLowerCase()).includes(e)) return true;
+  return false;
 }
 function renderAuthUI(){
   const statusEl=document.getElementById("authStatus");
   const loginBox=document.getElementById("loginBox");
   const importBox=document.getElementById("importBox");
+  const adminPanel=document.getElementById("adminPanel");
   if(currentUserEmail && isApproved(currentUserEmail)){
     const viaLabel = currentUserVia==="google" ? "Google Sign-In" : "กรอกอีเมลด้วยตนเอง";
     statusEl.innerHTML = `✅ เข้าสู่ระบบแล้ว: <b>${currentUserEmail}</b> <span style="font-weight:600;color:var(--gray);">(${viaLabel})</span>`;
     loginBox.style.display="none";
     importBox.style.display="block";
+    if(isRootAdmin(currentUserEmail)){
+      adminPanel.style.display="block";
+      renderAdminEmailList();
+    } else {
+      adminPanel.style.display="none";
+    }
   } else {
+    adminPanel.style.display="none";
     statusEl.textContent = "ยังไม่ได้เข้าสู่ระบบ";
     loginBox.style.display="block";
     importBox.style.display="none";
@@ -1722,7 +1787,7 @@ function decodeJwtPayload(token){
   );
   return JSON.parse(json);
 }
-function handleGoogleCredential(response){
+async function handleGoogleCredential(response){
   const noticeEl = document.getElementById("gsiNotice");
   try{
     const payload = decodeJwtPayload(response.credential);
@@ -1731,6 +1796,7 @@ function handleGoogleCredential(response){
       noticeEl.innerHTML = '<span class="msg-err">อีเมลนี้ยังไม่ได้ยืนยันกับ Google กรุณาใช้บัญชีอื่น</span>';
       return;
     }
+    await approvedEmailsReady;
     if(!isApproved(email)){
       noticeEl.innerHTML = `<span class="msg-err">บัญชี ${email} ไม่ได้รับอนุมัติให้นำเข้าข้อมูล กรุณาติดต่อผู้ดูแลระบบ (tvpwork@gmail.com)</span>`;
       return;
@@ -1750,7 +1816,7 @@ function showFallbackOnly(message){
   const fb = document.getElementById("fallbackLogin");
   if(gsiArea) gsiArea.style.display = "none";
   if(notice) notice.innerHTML = message ? `<span style="color:var(--gray);font-weight:600;">${message}</span>` : "";
-  if(fb) fb.open = true;
+  if(fb){ fb.style.display = "block"; fb.open = true; }
 }
 function initGoogleSignIn(){
   window.__initGoogleSignInReady = true;
@@ -1773,6 +1839,11 @@ function initGoogleSignIn(){
     const btnEl = document.getElementById("googleSignInBtn");
     document.getElementById("gsiArea").style.display = "block";
     google.accounts.id.renderButton(btnEl, {theme:"outline", size:"large", text:"signin_with", shape:"pill", locale:"th"});
+    // Google Sign-In ใช้งานได้จริง — ปิดช่องกรอกอีเมลด้วยตนเองทั้งหมด ห้ามใช้เป็นทางลัดเข้าระบบแทน OAuth จริง
+    const fb = document.getElementById("fallbackLogin");
+    if(fb){ fb.style.display = "none"; fb.open = false; }
+    const notice = document.getElementById("gsiNotice");
+    if(notice) notice.innerHTML = "";
   }catch(err){
     showFallbackOnly("Google Sign-In เริ่มการทำงานไม่สำเร็จ (ตรวจสอบ Authorized JavaScript origins ของ Client ID) — ใช้การกรอกอีเมลด้วยตนเองแทนได้");
   }
@@ -1783,7 +1854,7 @@ function handleGSILoadError(){
 }
 
 /* ---- Manual-email fallback (soft gate) ---- */
-function handleLogin(){
+async function handleLogin(){
   const input=document.getElementById("gmailInput");
   const msgEl=document.getElementById("loginMsg");
   const email=(input.value||"").trim();
@@ -1791,6 +1862,7 @@ function handleLogin(){
     msgEl.innerHTML='<span class="msg-err">กรุณากรอกอีเมล Gmail ที่ถูกต้อง (ต้องลงท้ายด้วย @gmail.com)</span>';
     return;
   }
+  await approvedEmailsReady;
   if(!isApproved(email)){
     msgEl.innerHTML='<span class="msg-err">อีเมลนี้ไม่ได้รับอนุมัติให้นำเข้าข้อมูล กรุณาติดต่อผู้ดูแลระบบ (tvpwork@gmail.com)</span>';
     return;
@@ -1810,6 +1882,85 @@ function handleLogout(){
   const im=document.getElementById("importMsg"); if(im) im.innerHTML="";
   renderAuthUI();
 }
+
+/* ---- Admin panel: manage the dynamic approved-email allow-list via GitHub API ---- */
+function b64EncodeUnicode(str){
+  return btoa(unescape(encodeURIComponent(str)));
+}
+async function githubApiRequest(method, body){
+  const tokenInput = document.getElementById("githubTokenInput");
+  const token = (tokenInput && tokenInput.value || "").trim();
+  if(!token) throw new Error("กรุณากรอก GitHub Personal Access Token ก่อน");
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${EMAILS_FILE_PATH}`;
+  const headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" };
+  if(method === "GET"){
+    const res = await fetch(url + "?ref=" + encodeURIComponent(GITHUB_BRANCH), { headers });
+    if(res.status === 404) return null; // ยังไม่เคยสร้างไฟล์นี้ในเว็บไซต์
+    if(!res.ok) throw new Error("GitHub API error " + res.status + ": " + (await res.text()).slice(0,200));
+    return res.json();
+  } else {
+    const res = await fetch(url, { method:"PUT", headers:{...headers, "Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if(!res.ok) throw new Error("GitHub API error " + res.status + ": " + (await res.text()).slice(0,200));
+    return res.json();
+  }
+}
+async function saveApprovedEmailsList(newList, commitMessage){
+  const msgEl = document.getElementById("adminMsg");
+  msgEl.innerHTML = "⏳ กำลังบันทึกไปที่ GitHub...";
+  try{
+    const existing = await githubApiRequest("GET");
+    const payload = {
+      message: commitMessage,
+      content: b64EncodeUnicode(JSON.stringify({ emails: newList }, null, 2)),
+      branch: GITHUB_BRANCH,
+    };
+    if(existing && existing.sha) payload.sha = existing.sha;
+    await githubApiRequest("PUT", payload);
+    dynamicApprovedEmails = newList;
+    msgEl.innerHTML = '<span class="msg-ok">✅ บันทึกสำเร็จ — จะมีผลกับผู้ใช้ทุกคนภายใน ~1 นาที (รอ GitHub Pages Build เว็บใหม่)</span>';
+    renderAdminEmailList();
+  }catch(err){
+    msgEl.innerHTML = `<span class="msg-err">❌ บันทึกไม่สำเร็จ: ${err.message}</span>`;
+  }
+}
+function renderAdminEmailList(){
+  const el = document.getElementById("adminEmailList");
+  if(!el) return;
+  const rootLower = ROOT_ADMIN_EMAILS.map(x=>x.toLowerCase());
+  const rootPills = ROOT_ADMIN_EMAILS.map(e=>`<span class="email-pill pill-admin">${e} <b>ผู้ดูแลระบบ</b></span>`).join("");
+  const staticPills = APPROVED_EMAILS
+    .filter(e=>!rootLower.includes(e.toLowerCase()))
+    .map(e=>`<span class="email-pill pill-static">${e} <b>ในไฟล์ต้นฉบับ</b></span>`).join("");
+  const dynamicPills = dynamicApprovedEmails
+    .filter(e=>!rootLower.includes((e||"").toLowerCase()))
+    .map(e=>`<span class="email-pill">${e} <button type="button" class="pill-x" data-email="${e}" title="ลบสิทธิ์">×</button></span>`).join("");
+  el.innerHTML = rootPills + staticPills + dynamicPills;
+  el.querySelectorAll(".pill-x").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const email = btn.dataset.email;
+      const newList = dynamicApprovedEmails.filter(e=>(e||"").toLowerCase() !== email.toLowerCase());
+      saveApprovedEmailsList(newList, `Remove approved email: ${email}`);
+    });
+  });
+}
+async function handleAddEmail(){
+  const input = document.getElementById("newApprovedEmailInput");
+  const msgEl = document.getElementById("adminMsg");
+  const email = (input.value||"").trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    msgEl.innerHTML = '<span class="msg-err">กรุณากรอกอีเมลที่ถูกต้อง</span>';
+    return;
+  }
+  await approvedEmailsReady;
+  if(isApproved(email)){
+    msgEl.innerHTML = '<span class="msg-err">อีเมลนี้ได้รับอนุมัติอยู่แล้ว</span>';
+    return;
+  }
+  const newList = [...dynamicApprovedEmails, email];
+  await saveApprovedEmailsList(newList, `Add approved email: ${email}`);
+  input.value = "";
+}
+
 function validateHeaders(headers){
   const norm=headers.map(h=>(h||"").toString().trim());
   const missing=REQUIRED_HEADERS.filter(h=>!norm.includes(h));
@@ -1921,6 +2072,8 @@ function init(){
   document.getElementById("btnLogout").addEventListener("click", handleLogout);
   document.getElementById("btnImport").addEventListener("click", handleImportFile);
   document.getElementById("btnResetData").addEventListener("click", handleResetData);
+  document.getElementById("btnAddEmail").addEventListener("click", handleAddEmail);
+  document.getElementById("newApprovedEmailInput").addEventListener("keydown", e=>{ if(e.key==="Enter") handleAddEmail(); });
   initGoogleSignIn(); // no-op / shows fallback notice if GIS script hasn't loaded yet — its own onload/onerror will call this again
   document.getElementById("footerNote").innerHTML = `
     แหล่งข้อมูล: ระยะเวลาการส่งข้อมูลผู้ป่วยในแยกรายเดือนที่ส่งข้อมูล (IP01,IP02).xlsx — Sheet1 &nbsp;•&nbsp;
@@ -1933,7 +2086,7 @@ function init(){
     resizeTimer = setTimeout(()=> renderCharts(monthly.filter(monthMatchesFilter)), 150);
   });
 }
-init();
+approvedEmailsReady.then(init); // รอโหลดรายชื่ออีเมลอนุมัติแบบไดนามิกจาก GitHub ก่อน แล้วค่อยเริ่ม render (กัน admin badge/isApproved ใช้ข้อมูลเก่า)
 </script>
 </body>
 </html>
