@@ -880,14 +880,12 @@ function drawLineChart(container, labels, values, opts){
     svg.appendChild(t);
   });
 
-  // target reference line
+  // เส้นเป้าหมาย (target reference line) — แสดงเฉพาะเส้นประ ไม่แสดงข้อความ "เป้าหมาย x%" บนกราฟ
+  // เพราะจะไปทับกับตัวเลข Data Label ของจุดที่มีค่าใกล้เคียงเป้าหมาย (ดูคำอธิบายในกล่อง Legend ใต้กราฟแทน)
   if (opts.target !== undefined){
     const ty = y(opts.target);
     const line = svgEl("line",{x1:marginL,x2:W-marginR,y1:ty,y2:ty,stroke:COLORS.bad,"stroke-width":1.5,"stroke-dasharray":"6,4"});
     svg.appendChild(line);
-    const lbl = svgEl("text",{class:"axis-text",x:W-marginR,y:ty-4,"text-anchor":"end",fill:COLORS.bad});
-    lbl.textContent = `เป้าหมาย ${opts.target}%`;
-    svg.appendChild(lbl);
   }
 
   // area fill
@@ -913,7 +911,12 @@ function drawLineChart(container, labels, values, opts){
     }
     svg.appendChild(c);
     if (opts.dataLabels){
-      const t = svgEl("text",{class:"datalabel",x:x(i),y:y(v)-11});
+      // จุดแรก/จุดสุดท้าย ชิดขอบซ้าย-ขวาของกราฟพอดี ถ้า Label กึ่งกลางจุดตามปกติ (text-anchor:middle)
+      // ครึ่งซ้าย/ขวาของตัวหนังสือจะยื่นออกไปทับตัวเลขแกน Y (ฝั่งซ้าย) จึงสลับให้ชิดข้างจุดแทนเฉพาะสองจุดปลาย
+      // ใช้ style="text-anchor:..." (ไม่ใช่ attribute เฉยๆ) เพราะ CSS class .datalabel{text-anchor:middle}
+      // ใน stylesheet จะชนะ presentation attribute เสมอ ถ้าไม่ใส่ผ่าน style จุดปลายจะไม่ขยับตามที่ตั้งใจ
+      const anchor = i===0 ? "start" : (i===values.length-1 ? "end" : "middle");
+      const t = svgEl("text",{class:"datalabel",x:x(i),y:y(v)-12,style:`text-anchor:${anchor}`});
       t.textContent = (opts.dataLabelFmt ? opts.dataLabelFmt(v) : v);
       svg.appendChild(t);
     }
