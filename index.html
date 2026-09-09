@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IP Claim Submission Timeliness Dashboard</title>
+<title>Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน</title>
+<meta name="description" content="Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน">
+<meta property="og:title" content="Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน">
+<meta property="og:description" content="Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน">
+<meta property="og:site_name" content="Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน">
+<meta name="twitter:description" content="Dashboard ติดตามความทันเวลาการส่งข้อมูลผู้ป่วยใน">
 <!--
   Google Identity Services (Sign-In With Google) — the one deliberate external
   script dependency in this file. Required for real Google OAuth; everything
@@ -114,6 +122,8 @@
   .btn-reset:hover{filter:brightness(1.08);}
   .btn-ghost{background:#F1F5F9;color:var(--text-dark);border:1px solid var(--border);}
   .btn-ghost:hover{background:#E2E8F0;}
+  .btn-danger{background:linear-gradient(135deg,#DC2626,#B91C1C);color:#fff;box-shadow:0 4px 12px rgba(220,38,38,0.3);}
+  .btn-danger:hover{filter:brightness(1.08);}
   .filter-note{font-size:11.5px;color:var(--gray);margin-top:12px;line-height:1.6;padding-top:10px;border-top:1px dashed var(--border);}
 
   /* KPI — white card, colored left accent bar + decorative corner circle (per component 5.1) */
@@ -318,7 +328,15 @@
     </div>
 
     <div id="importBox" class="import-box" style="display:none">
-      <div class="import-row">
+      <div class="note-box" style="margin-top:0">
+        ต้องกรอก <b>GitHub Personal Access Token</b> ก่อนนำเข้า/รีเซ็ตข้อมูล เพื่อบันทึกผลถาวรไปที่ไฟล์ <code>dashboard-data.json</code> บน GitHub ให้ผู้ใช้ทุกคนเห็นข้อมูลเดียวกัน
+        (แนะนำสร้างแบบ Fine-grained จำกัดสิทธิ์เฉพาะ Repo นี้ ให้สิทธิ์ Contents: Read and write เท่านั้น) — Token จะถูกเก็บไว้ในหน่วยความจำของเบราว์เซอร์นี้เท่านั้นระหว่างที่ใช้งาน ไม่ถูกบันทึกลงไฟล์
+        หากไม่กรอก Token การนำเข้า/รีเซ็ตจะยังทำงานได้แต่<b>เห็นเฉพาะหน้าจอนี้เท่านั้น</b> (จะหายไปเมื่อรีเฟรช และคนอื่นจะไม่เห็น)
+      </div>
+      <div class="login-row" style="margin-top:8px">
+        <input type="password" id="importTokenInput" placeholder="GitHub Personal Access Token (ghp_... หรือ github_pat_...)" style="flex:1;min-width:280px;" autocomplete="off" />
+      </div>
+      <div class="import-row" style="margin-top:8px">
         <input type="file" id="importFile" accept=".xlsx,.csv" />
         <button class="btn btn-primary" id="btnImport">📥 นำเข้าและอัปเดตข้อมูล</button>
         <button class="btn" id="btnResetData">↺ กลับไปใช้ข้อมูลต้นฉบับ</button>
@@ -346,6 +364,15 @@
         <button class="btn btn-primary" id="btnAddEmail">➕ เพิ่มสิทธิ์</button>
       </div>
       <div id="adminMsg" class="import-msg"></div>
+
+      <div class="admin-panel-title" style="margin-top:18px">🗑️ ลบข้อมูลปีงบประมาณ (ป้องกันข้อมูลสะสมมากเกินไป)</div>
+      <div class="note-box" style="margin-top:0">
+        เลือกปีงบประมาณที่ต้องการลบทิ้งทั้งหมด (ใช้ GitHub Token ช่องด้านบน) — การลบมีผลถาวรกับทุกคนที่เปิด Dashboard นี้ และไม่สามารถกู้คืนได้ ควร Export ข้อมูลปีนั้นเก็บไว้ก่อน หากยังต้องใช้อ้างอิงในอนาคต
+      </div>
+      <div class="login-row" style="margin-top:8px">
+        <select id="deleteFySelect" style="flex:1;min-width:200px;"></select>
+        <button class="btn btn-danger" id="btnDeleteFy">🗑️ ลบข้อมูลปีงบประมาณนี้</button>
+      </div>
     </div>
   </div>
 
@@ -616,7 +643,7 @@ function buildDataModel(rows){
 
   OPTIONS = {
     fy: uniqSorted(monthly.map(m=>m.fy)),
-    month: uniqSorted(monthly.map(m=>m.month)),
+    month: uniqSortedFiscalMonth(monthly.map(m=>m.month)),
     quarter: ["Q1","Q2","Q3","Q4"],
     bucket: BUCKET_DEFS.map(b=>b.key),
     status: ["ontime","late"],
@@ -634,9 +661,15 @@ function buildDataModel(rows){
 /* ======================================================================
    3) FILTER STATE
    ====================================================================== */
-function uniqSorted(arr){ return [...new Set(arr)].sort(); }
+function uniqSorted(arr){ return [...new Set(arr)].sort((a,b)=> a-b); } // sort ตัวเลขจริง (ปีงบประมาณ ฯลฯ) ไม่ใช่เรียงแบบข้อความ
+// ลำดับเดือนแบบปีงบประมาณไทย: เริ่ม ต.ค.(10) พ.ย.(11) ธ.ค.(12) แล้วต่อ ม.ค.(1) ... ก.ย.(9)
+const FISCAL_MONTH_ORDER = [10,11,12,1,2,3,4,5,6,7,8,9];
+function uniqSortedFiscalMonth(arr){
+  return [...new Set(arr)].sort((a,b)=> FISCAL_MONTH_ORDER.indexOf(a) - FISCAL_MONTH_ORDER.indexOf(b));
+}
 
-buildDataModel(rawRows);
+// หมายเหตุ: buildDataModel(rawRows) จะถูกเรียกหลังจากรอโหลด sharedDataReady (dashboard-data.json) เสร็จก่อน
+// (ดูท้ายไฟล์: Promise.all([approvedEmailsReady, sharedDataReady]).then(...)) เพื่อให้ rawRows เป็นชุดข้อมูลล่าสุดจริง ๆ ก่อนคำนวณ
 
 const state = {
   fy: new Set(), month: new Set(), quarter: new Set(),
@@ -1716,9 +1749,10 @@ const APPROVED_EMAILS = ["tvpwork@gmail.com"]; // อีเมลที่อน
 const ROOT_ADMIN_EMAILS = ["tvpwork@gmail.com"]; // ผู้ดูแลระบบตัวจริง — เห็นแผงจัดการสิทธิ์ผู้ใช้ และแก้ไขไม่ได้ผ่าน GUI (กันล็อกตัวเองออกจากระบบ)
 // ที่อยู่ Repo บน GitHub ที่ใช้เก็บรายชื่ออีเมลที่อนุมัติแบบไดนามิก (แก้ไขได้ผ่าน GUI โดยไม่ต้องแก้โค้ด)
 const GITHUB_OWNER = "tvpwork-dotcom";
-const GITHUB_REPO = "Repository-name-";
+const GITHUB_REPO = "ip-timeliness-dashboard";
 const GITHUB_BRANCH = "main";
 const EMAILS_FILE_PATH = "approved-emails.json";
+const DATA_FILE_PATH = "dashboard-data.json"; // เก็บชุดข้อมูลจริง (rows) ที่นำเข้า/ลบ ให้ทุกคนเห็นตรงกัน
 
 const ORIGINAL_RAW_ROWS = parseCsv(RAW_CSV);
 let currentUserEmail = null;
@@ -1735,6 +1769,22 @@ const approvedEmailsReady = (async () => {
       if(Array.isArray(data.emails)) dynamicApprovedEmails = data.emails;
     }
   }catch(e){ /* offline / เปิดแบบ file:// / ยังไม่เคยสร้างไฟล์ — ใช้ APPROVED_EMAILS/ROOT_ADMIN_EMAILS ที่ฝังในไฟล์แทน */ }
+})();
+
+// ชุดข้อมูลจริงแบบไดนามิก — โหลดจาก dashboard-data.json ในเว็บไซต์เดียวกัน (ถ้ามีการนำเข้า/ลบข้อมูลไว้ก่อนหน้านี้)
+// ถ้าโหลดไม่สำเร็จ หรือยังไม่เคยมีไฟล์นี้ จะใช้ RAW_CSV ที่ฝังในไฟล์ (ข้อมูลตั้งต้น) แทน
+let sharedDataLoaded = false;
+const sharedDataReady = (async () => {
+  try{
+    const res = await fetch("./" + DATA_FILE_PATH, {cache:"no-store"});
+    if(res.ok){
+      const data = await res.json();
+      if(Array.isArray(data.rows) && data.rows.length){
+        rawRows = data.rows;
+        sharedDataLoaded = true;
+      }
+    }
+  }catch(e){ /* offline / file:// / ยังไม่เคยสร้างไฟล์ — ใช้ RAW_CSV ตั้งต้นแทน */ }
 })();
 
 function isRootAdmin(email){
@@ -1761,6 +1811,7 @@ function renderAuthUI(){
     if(isRootAdmin(currentUserEmail)){
       adminPanel.style.display="block";
       renderAdminEmailList();
+      renderDeleteFySelect();
     } else {
       adminPanel.style.display="none";
     }
@@ -1881,11 +1932,11 @@ function handleLogout(){
 function b64EncodeUnicode(str){
   return btoa(unescape(encodeURIComponent(str)));
 }
-async function githubApiRequest(method, body){
-  const tokenInput = document.getElementById("githubTokenInput");
+async function githubApiRequest(method, path, body, tokenInputId){
+  const tokenInput = document.getElementById(tokenInputId || "githubTokenInput");
   const token = (tokenInput && tokenInput.value || "").trim();
   if(!token) throw new Error("กรุณากรอก GitHub Personal Access Token ก่อน");
-  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${EMAILS_FILE_PATH}`;
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
   const headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" };
   if(method === "GET"){
     const res = await fetch(url + "?ref=" + encodeURIComponent(GITHUB_BRANCH), { headers });
@@ -1902,19 +1953,41 @@ async function saveApprovedEmailsList(newList, commitMessage){
   const msgEl = document.getElementById("adminMsg");
   msgEl.innerHTML = "⏳ กำลังบันทึกไปที่ GitHub...";
   try{
-    const existing = await githubApiRequest("GET");
+    const existing = await githubApiRequest("GET", EMAILS_FILE_PATH, null, "githubTokenInput");
     const payload = {
       message: commitMessage,
       content: b64EncodeUnicode(JSON.stringify({ emails: newList }, null, 2)),
       branch: GITHUB_BRANCH,
     };
     if(existing && existing.sha) payload.sha = existing.sha;
-    await githubApiRequest("PUT", payload);
+    await githubApiRequest("PUT", EMAILS_FILE_PATH, payload, "githubTokenInput");
     dynamicApprovedEmails = newList;
     msgEl.innerHTML = '<span class="msg-ok">✅ บันทึกสำเร็จ — จะมีผลกับผู้ใช้ทุกคนภายใน ~1 นาที (รอ GitHub Pages Build เว็บใหม่)</span>';
     renderAdminEmailList();
   }catch(err){
     msgEl.innerHTML = `<span class="msg-err">❌ บันทึกไม่สำเร็จ: ${err.message}</span>`;
+  }
+}
+// บันทึกชุดข้อมูลจริง (rows) ไปที่ dashboard-data.json บน GitHub — ใช้ได้ทั้งจากแผงนำเข้าข้อมูล (ทุกคนที่ได้รับอนุมัติ)
+// และแผงผู้ดูแลระบบ (ลบข้อมูลปีงบประมาณ) โดยระบุ tokenInputId ของช่องกรอก Token ที่จะใช้
+async function saveSharedData(rows, commitMessage, tokenInputId, msgElId){
+  const msgEl = document.getElementById(msgElId);
+  if(msgEl) msgEl.innerHTML = "⏳ กำลังบันทึกข้อมูลไปที่ GitHub (ให้ทุกคนเห็นตรงกัน)...";
+  try{
+    const existing = await githubApiRequest("GET", DATA_FILE_PATH, null, tokenInputId);
+    const payload = {
+      message: commitMessage,
+      content: b64EncodeUnicode(JSON.stringify({ rows: rows, updatedAt: new Date().toISOString() }, null, 2)),
+      branch: GITHUB_BRANCH,
+    };
+    if(existing && existing.sha) payload.sha = existing.sha;
+    await githubApiRequest("PUT", DATA_FILE_PATH, payload, tokenInputId);
+    sharedDataLoaded = true;
+    if(msgEl) msgEl.innerHTML = '<span class="msg-ok">✅ บันทึกสำเร็จ — ข้อมูลนี้จะแสดงให้ทุกคนเห็นภายใน ~1 นาที (รอ GitHub Pages Build เว็บใหม่)</span>';
+    return true;
+  }catch(err){
+    if(msgEl) msgEl.innerHTML = `<span class="msg-err">⚠️ อัปเดตหน้าจอนี้แล้ว แต่บันทึกถาวรไปที่ GitHub ไม่สำเร็จ (คนอื่นจะยังไม่เห็นการเปลี่ยนแปลงนี้): ${err.message}</span>`;
+    return false;
   }
 }
 function renderAdminEmailList(){
@@ -1990,6 +2063,7 @@ function rebuildAfterDataChange(){
   renderMeta();
   renderDQBanner();
   renderAll();
+  renderDeleteFySelect();
 }
 async function handleImportFile(){
   const fileInput=document.getElementById("importFile");
@@ -2023,17 +2097,43 @@ async function handleImportFile(){
     const {merged, added, updated} = mergeRows(rawRows, importedObjs);
     rawRows = merged;
     rebuildAfterDataChange();
-    msgEl.innerHTML = `<span class="msg-ok">✅ นำเข้าสำเร็จ: เพิ่มใหม่ ${added} เดือน, อัปเดตทับ ${updated} เดือน (รวมทั้งหมดตอนนี้ ${monthly.length} เดือน)</span>`;
+    msgEl.innerHTML = `<span class="msg-ok">✅ นำเข้าสำเร็จ (หน้าจอนี้): เพิ่มใหม่ ${added} เดือน, อัปเดตทับ ${updated} เดือน (รวมทั้งหมดตอนนี้ ${monthly.length} เดือน) — กำลังบันทึกถาวร...</span>`;
     fileInput.value="";
+    await saveSharedData(rawRows, `Import data via web (${currentUserEmail||"unknown"}): +${added} เดือน, อัปเดต ${updated} เดือน`, "importTokenInput", "importMsg");
   } catch(err){
     msgEl.innerHTML = '<span class="msg-err">❌ นำเข้าไม่สำเร็จ: '+(err && err.message ? err.message : err)+'</span>';
   }
 }
-function handleResetData(){
+async function handleResetData(){
   rawRows = ORIGINAL_RAW_ROWS.map(r=>({...r}));
   rebuildAfterDataChange();
   const msgEl=document.getElementById("importMsg");
-  if(msgEl) msgEl.innerHTML = '<span class="msg-ok">↺ กลับไปใช้ข้อมูลต้นฉบับแล้ว</span>';
+  if(msgEl) msgEl.innerHTML = '<span class="msg-ok">↺ กลับไปใช้ข้อมูลต้นฉบับแล้ว (หน้าจอนี้) — กำลังบันทึกถาวร...</span>';
+  await saveSharedData(rawRows, `Reset data to original via web (${currentUserEmail||"unknown"})`, "importTokenInput", "importMsg");
+}
+// ลบข้อมูลทั้งปีงบประมาณที่เลือก (สำหรับผู้ดูแลระบบ) เพื่อไม่ให้ข้อมูลสะสมมากเกินไป
+async function handleDeleteFiscalYear(){
+  const sel = document.getElementById("deleteFySelect");
+  const msgEl = document.getElementById("adminMsg");
+  const fy = sel && sel.value;
+  if(!fy){ if(msgEl) msgEl.innerHTML = '<span class="msg-err">กรุณาเลือกปีงบประมาณที่ต้องการลบ</span>'; return; }
+  const before = rawRows.length;
+  const remaining = rawRows.filter(r => String(fiscalInfo(r["เดือนที่ส่ง"]).fy) !== String(fy));
+  if(remaining.length === before){
+    if(msgEl) msgEl.innerHTML = '<span class="msg-err">ไม่พบข้อมูลของปีงบประมาณ '+fy+'</span>';
+    return;
+  }
+  rawRows = remaining;
+  rebuildAfterDataChange();
+  if(msgEl) msgEl.innerHTML = `<span class="msg-ok">🗑️ ลบข้อมูลปีงบประมาณ ${fy} แล้ว (หน้าจอนี้) — กำลังบันทึกถาวร...</span>`;
+  await saveSharedData(rawRows, `Delete fiscal year ${fy} data via admin (${currentUserEmail||"unknown"})`, "githubTokenInput", "adminMsg");
+  renderDeleteFySelect();
+}
+function renderDeleteFySelect(){
+  const sel = document.getElementById("deleteFySelect");
+  if(!sel) return;
+  const fys = uniqSorted(monthly.map(m=>m.fy));
+  sel.innerHTML = '<option value="">— เลือกปีงบประมาณ —</option>' + fys.map(fy=>`<option value="${fy}">FY ${fy}</option>`).join("");
 }
 
 /* ======================================================================
@@ -2068,6 +2168,14 @@ function init(){
   document.getElementById("btnResetData").addEventListener("click", handleResetData);
   document.getElementById("btnAddEmail").addEventListener("click", handleAddEmail);
   document.getElementById("newApprovedEmailInput").addEventListener("keydown", e=>{ if(e.key==="Enter") handleAddEmail(); });
+  document.getElementById("btnDeleteFy").addEventListener("click", ()=>{
+    const sel=document.getElementById("deleteFySelect");
+    const fy=sel && sel.value;
+    if(!fy) return;
+    if(confirm(`ยืนยันลบข้อมูลปีงบประมาณ ${fy} ทั้งหมด? การกระทำนี้ไม่สามารถกู้คืนได้`)){
+      handleDeleteFiscalYear();
+    }
+  });
   initGoogleSignIn(); // no-op / shows fallback notice if GIS script hasn't loaded yet — its own onload/onerror will call this again
   document.getElementById("footerNote").innerHTML = `
     แหล่งข้อมูล: ระยะเวลาการส่งข้อมูลผู้ป่วยในแยกรายเดือนที่ส่งข้อมูล (IP01,IP02).xlsx — Sheet1 &nbsp;•&nbsp;
@@ -2080,7 +2188,12 @@ function init(){
     resizeTimer = setTimeout(()=> renderCharts(monthly.filter(monthMatchesFilter)), 150);
   });
 }
-approvedEmailsReady.then(init); // รอโหลดรายชื่ออีเมลอนุมัติแบบไดนามิกจาก GitHub ก่อน แล้วค่อยเริ่ม render (กัน admin badge/isApproved ใช้ข้อมูลเก่า)
+// รอโหลดทั้งรายชื่ออีเมลอนุมัติ (approved-emails.json) และชุดข้อมูลจริงล่าสุด (dashboard-data.json) จาก GitHub ก่อน
+// แล้วค่อยคำนวณ buildDataModel + เริ่ม render (กัน KPI/กราฟ/ตาราง ใช้ข้อมูลเก่าหรือ rawRows ที่ยังไม่ถูกแทนที่)
+Promise.all([approvedEmailsReady, sharedDataReady]).then(() => {
+  buildDataModel(rawRows);
+  init();
+});
 </script>
 </body>
 </html>
