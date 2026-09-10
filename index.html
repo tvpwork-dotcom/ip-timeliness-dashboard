@@ -404,7 +404,7 @@
   <div class="row row-2">
     <div class="card card-top-blue">
       <h3>📈 แนวโน้มการส่งข้อมูลผู้ป่วยในภายใน 30 วัน</h3>
-      <p class="desc">Monthly Timeliness Trend — % ส่งภายใน 30 วันต่อเดือน เทียบเป้าหมาย 90% (คลิกจุดบนกราฟเพื่อ Drill-down รายเดือน)</p>
+      <p class="desc">Monthly Timeliness Trend — % ส่งภายใน 30 วันต่อเดือน เทียบเป้าหมาย 100% (คลิกจุดบนกราฟเพื่อ Drill-down รายเดือน)</p>
       <div class="chart-wrap h-320" id="chartTrend"></div>
       <div class="chart-scroll-hint" id="chartTrendHint">👉 เลื่อนซ้าย-ขวาเพื่อดูทุกเดือน</div>
     </div>
@@ -1090,7 +1090,7 @@ function renderKPI(filtered){
   const cards = [
     {lbl:"จำนวนครั้งทั้งหมด", val:fmtInt(total), sub:`${filtered.length} เดือนที่เลือก`, cls:"primary"},
     {lbl:"จำนวนครั้งส่งภายใน 30 วัน", val:fmtInt(le30), sub:`คิดเป็น ${fmtPct(pctLe30)}`, cls:"good"},
-    {lbl:"% ส่งภายใน 30 วัน", val:fmtPct(pctLe30), sub:"เป้าหมาย ≥ 90%", cls: pctLe30>=90?"good":(pctLe30>=80?"warn":"bad")},
+    {lbl:"% ส่งภายใน 30 วัน", val:fmtPct(pctLe30), sub:"เป้าหมาย ≥ 100%", cls: pctLe30>=100?"good":(pctLe30>=90?"warn":"bad")},
     {lbl:"จำนวนครั้งส่งเกิน 30 วัน", val:fmtInt(gt30), sub:`คิดเป็น ${fmtPct(pctGt30)}`, cls:"orange"},
     {lbl:"% ส่งเกิน 30 วัน", val:fmtPct(pctGt30), sub:"ยิ่งต่ำยิ่งดี", cls: pctGt30<=10?"good":(pctGt30<=20?"warn":"bad")},
     {lbl:"AdjRW รวม", val:fmtAdj(adjTotal), sub:"น้ำหนักสัมพัทธ์รวมทั้งหมด", cls:"purple"},
@@ -1120,10 +1120,10 @@ function renderKPI(filtered){
 function renderAlerts(kpi, filtered){
   const panel = document.getElementById("alertPanel");
   const alerts = [];
-  if (kpi.pctLe30 < 80){
-    alerts.push(`🚨 <b>ต้องเร่งติดตาม:</b> % ส่งภายใน 30 วัน อยู่ที่ ${fmtPct(kpi.pctLe30)} ต่ำกว่า 80%`);
-  } else if (kpi.pctLe30 < 90){
-    alerts.push(`⚠️ <b>ต่ำกว่าเป้าหมาย:</b> % ส่งภายใน 30 วัน อยู่ที่ ${fmtPct(kpi.pctLe30)} ต่ำกว่าเป้าหมาย 90% อยู่ ${(90-kpi.pctLe30).toFixed(2)} จุด`);
+  if (kpi.pctLe30 < 90){
+    alerts.push(`🚨 <b>ต้องเร่งติดตาม:</b> % ส่งภายใน 30 วัน อยู่ที่ ${fmtPct(kpi.pctLe30)} ต่ำกว่า 90%`);
+  } else if (kpi.pctLe30 < 100){
+    alerts.push(`⚠️ <b>ต่ำกว่าเป้าหมาย:</b> % ส่งภายใน 30 วัน อยู่ที่ ${fmtPct(kpi.pctLe30)} ต่ำกว่าเป้าหมาย 100% อยู่ ${(100-kpi.pctLe30).toFixed(2)} จุด`);
   }
   // AdjRW weight vs count weight check for the >30 group
   const pctCountGt30 = kpi.pctGt30;
@@ -1155,15 +1155,15 @@ function renderCharts(filtered){
   // --- Trend chart ---
   const pctData = sorted.map(m=>Number(m.pctLe30.toFixed(2)));
   drawLineChart(document.getElementById("chartTrend"), labels, pctData, {
-    yMax:100, yMin:0, target:90, dataLabels:true,
+    yMax:100, yMin:0, target:100, dataLabels:true,
     dataLabelFmt:v=>v.toFixed(1)+"%",
-    pointColor:v=> v>=90?COLORS.good : v>=80?COLORS.warn : COLORS.bad,
+    pointColor:v=> v>=100?COLORS.good : v>=90?COLORS.warn : COLORS.bad,
     onClick:(i)=> setMonthFilter(sorted[i].monthKey),
     onHover:(i)=>{
       const m = sorted[i];
       return `<b>${m.monthLabel}</b><br>% ≤30 วัน: ${fmtPct(m.pctLe30)}<br>จำนวนทั้งหมด: ${fmtInt(m.total)}<br>≤30 วัน: ${fmtInt(m.le30)}<br>&gt;30 วัน: ${fmtInt(m.gt30)}<br>AdjRW: ${fmtAdj(m.adjTotal)}`;
     },
-    legend:[{color:COLORS.blue,label:"% ส่งภายใน 30 วัน"},{color:COLORS.bad,label:"เป้าหมาย 90%"}]
+    legend:[{color:COLORS.blue,label:"% ส่งภายใน 30 วัน"},{color:COLORS.bad,label:"เป้าหมาย 100%"}]
   });
 
   // --- Ranking chart (desc by pctGt30) ---
@@ -1218,11 +1218,11 @@ function renderCharts(filtered){
 function renderInsight(kpi, filtered){
   const list = document.getElementById("insightList");
   const items = [];
-  const gapToTarget = 90 - kpi.pctLe30;
+  const gapToTarget = 100 - kpi.pctLe30;
   if (gapToTarget > 0){
-    items.push(`ข้อมูลที่เลือกมีการส่งข้อมูลภายใน 30 วัน <b>${fmtPct(kpi.pctLe30)}</b> ต่ำกว่าเป้าหมาย 90% อยู่ <b>${gapToTarget.toFixed(2)} จุดเปอร์เซ็นต์</b>`);
+    items.push(`ข้อมูลที่เลือกมีการส่งข้อมูลภายใน 30 วัน <b>${fmtPct(kpi.pctLe30)}</b> ต่ำกว่าเป้าหมาย 100% อยู่ <b>${gapToTarget.toFixed(2)} จุดเปอร์เซ็นต์</b>`);
   } else {
-    items.push(`ข้อมูลที่เลือกมีการส่งข้อมูลภายใน 30 วัน <b>${fmtPct(kpi.pctLe30)}</b> ผ่านเป้าหมาย 90% แล้ว (สูงกว่าเป้า ${(-gapToTarget).toFixed(2)} จุด)`);
+    items.push(`ข้อมูลที่เลือกมีการส่งข้อมูลภายใน 30 วัน <b>${fmtPct(kpi.pctLe30)}</b> ผ่านเป้าหมาย 100% แล้ว (สูงกว่าเป้า ${(-gapToTarget).toFixed(2)} จุด)`);
   }
   if (kpi.worstMonth){
     items.push(`เดือนที่ควรเฝ้าระวังมากที่สุดคือ <b>${kpi.worstMonth.monthLabelFull || kpi.worstMonth.monthLabel}</b> (% ≤30 วัน = ${fmtPct(kpi.worstMonth.pctLe30)})`);
@@ -1258,8 +1258,8 @@ let bucketSortState = {key:"monthLabel", dir:1};
 let monthSortState = {key:"monthKey", dir:1};
 
 function statusPill(pct){
-  if (pct>=90) return `<span class="status-pill pill-good">ดี</span>`;
-  if (pct>=80) return `<span class="status-pill pill-warn">เฝ้าระวัง</span>`;
+  if (pct>=100) return `<span class="status-pill pill-good">ดี</span>`;
+  if (pct>=90) return `<span class="status-pill pill-warn">เฝ้าระวัง</span>`;
   return `<span class="status-pill pill-bad">ต้องเร่งแก้ไข</span>`;
 }
 
@@ -1521,7 +1521,7 @@ function exportExcel(){
     {v:Number(m.adjTotal.toFixed(2)), t:"n"},
     {v:Number(m.adjLe30.toFixed(2)), t:"n"},
     {v:Number(m.adjGt30.toFixed(2)), t:"n"},
-    {v: m.pctLe30>=90?"ดี":(m.pctLe30>=80?"เฝ้าระวัง":"ต้องเร่งแก้ไข"), t:"s"},
+    {v: m.pctLe30>=100?"ดี":(m.pctLe30>=90?"เฝ้าระวัง":"ต้องเร่งแก้ไข"), t:"s"},
   ]);
   XlsxWriter.download(headers, dataRows, "ip_submission_timeliness_detail.xlsx");
 }
